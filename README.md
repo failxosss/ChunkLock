@@ -11,6 +11,8 @@ Potřebuješ Javu 21 a Maven.
 
 Výsledek: `target/ChunkLock-1.0.0.jar` -> do `plugins/`. Vault je volitelný (peníze).
 
+Na GitHubu se plugin sestaví sám (záložka **Actions** -> poslední běh -> **Artifacts** -> `ChunkLock`).
+
 ## Příkazy
 | Příkaz | Popis |
 |---|---|
