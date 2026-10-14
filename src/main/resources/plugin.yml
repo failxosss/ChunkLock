@@ -20,6 +20,9 @@ permissions:
   chunklock.admin:
     description: Admin příkazy (/chunk admin ...)
     default: op
+  chunklock.buy:
+    description: Nákup chunků za peníze (SHIFT + klik na cedulku) a zobrazení ceny
+    default: false
   chunklock.bypass.protection:
     description: Obejití ochrany chunků a zamčených hranic
     default: op

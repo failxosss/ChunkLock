@@ -5,13 +5,22 @@ import dev.chunklock.manager.IslandManager.Plot;
 import dev.chunklock.model.Island;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerRespawnEvent;
+
+import java.util.HashSet;
+import java.util.Set;
+import java.util.UUID;
 
 public final class PlayerListener implements Listener {
 
     private final ChunkLockPlugin plugin;
+    /** Hráči, kteří zemřeli v chunk světě - po respawnu se vrátí na svůj chunk. */
+    private final Set<UUID> diedInChunkWorld = new HashSet<>();
 
     public PlayerListener(ChunkLockPlugin plugin) {
         this.plugin = plugin;
@@ -48,7 +57,26 @@ public final class PlayerListener implements Listener {
     }
 
     @EventHandler
+    public void onDeath(PlayerDeathEvent e) {
+        Player player = e.getEntity();
+        if (plugin.islands().isChunkWorld(player.getWorld())) {
+            diedInChunkWorld.add(player.getUniqueId());
+        }
+    }
+
+    /** Smrt v chunk světě = respawn na vlastním (aktivním) chunku. */
+    @EventHandler(priority = EventPriority.HIGH)
+    public void onRespawn(PlayerRespawnEvent e) {
+        Player player = e.getPlayer();
+        if (!diedInChunkWorld.remove(player.getUniqueId())) return;
+        Island island = plugin.islands().activeIsland(player.getUniqueId());
+        if (island == null) return;
+        e.setRespawnLocation(plugin.islands().spawnLocation(island));
+    }
+
+    @EventHandler
     public void onQuit(PlayerQuitEvent e) {
         plugin.invites().clear(e.getPlayer().getUniqueId());
+        diedInChunkWorld.remove(e.getPlayer().getUniqueId());
     }
 }

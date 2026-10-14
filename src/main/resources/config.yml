@@ -129,8 +129,8 @@ unlock:
     reduce-by-progress: true
     # Permise potřebná pro nákup za peníze (SHIFT + klik). Hráči/skupiny bez ní
     # cenu na cedulce vůbec neuvidí a nemůžou platit. Prázdné = smí každý.
-    # Příklad: "chunklock.buy" a pak ji dej skupině v LuckPerms.
-    permission: ""
+    # Dej ji skupině v LuckPerms: /lp group vip permission set chunklock.buy true
+    permission: "chunklock.buy"
   # Požadavky podle počtu už odemčených chunků ("from").
   tiers:
     - from: 0
