@@ -306,8 +306,9 @@ public final class IslandManager {
         int stoneBottom = s.fillerDepth + s.stoneDepth;
         for (Settings.Ore ore : ores.list()) {
             if (ore.amount() <= 0 || random.nextDouble() * 100.0 >= ore.chance()) continue;
-            int min = Math.max(stoneTop, ore.minDepth());
-            int max = Math.min(stoneBottom, ore.maxDepth());
+            boolean full = plugin.getConfig().getBoolean("island.terrain.ores-full-depth", false);
+            int min = full ? stoneTop : Math.max(stoneTop, ore.minDepth());
+            int max = full ? stoneBottom : Math.min(stoneBottom, ore.maxDepth());
             if (min > max) continue;
             int remaining = ore.amount();
             int guard = ore.amount() * 20 + 50;

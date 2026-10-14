@@ -51,11 +51,12 @@ public final class UnlockService {
         ConfigurationSection v = plugin.getConfig().getConfigurationSection("unlock.variation");
         if (v == null || !v.getBoolean("enabled", true) || pool.isEmpty()) return pool;
 
-        long seed = island.owner().getMostSignificantBits() * 31L
-                + island.owner().getLeastSignificantBits() * 17L
-                + rel.key() * 1_000_003L
-                + tier.from() * 7919L;
+        long seed = mix(island.owner().getMostSignificantBits());
+        seed = mix(seed ^ island.owner().getLeastSignificantBits());
+        seed = mix(seed ^ rel.key());
+        seed = mix(seed ^ tier.from());
         Random rnd = new Random(seed);
+        rnd.nextLong(); // rozehřátí
 
         int min = Math.max(1, Math.min(v.getInt("min-items", pool.size()), pool.size()));
         int max = Math.max(min, Math.min(v.getInt("max-items", pool.size()), pool.size()));
@@ -76,6 +77,14 @@ public final class UnlockService {
             out.add(new Settings.Requirement(base.material(), amount));
         }
         return out;
+    }
+
+    /** SplitMix64 - rozptýlí podobná semínka, aby sousední chunky nedostaly skoro stejný náhodný výběr. */
+    private static long mix(long z) {
+        z += 0x9E3779B97F4A7C15L;
+        z = (z ^ (z >>> 30)) * 0xBF58476D1CE4E5B9L;
+        z = (z ^ (z >>> 27)) * 0x94D049BB133111EBL;
+        return z ^ (z >>> 31);
     }
 
     public boolean isComplete(Island island, ChunkPos rel) {
