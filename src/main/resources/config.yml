@@ -4,9 +4,11 @@
 #  (změny rozměrů ostrova platí jen pro nově vytvořené ostrovy)
 # ============================================================
 
-# Svět, kde ostrovy vznikají (prázdný void svět).
+# Svět, kde ostrovy vznikají (prázdný void svět). Když hráč napíše /chunk, jeho chunk
+# se vytvoří v tomhle světě. Změna platí po restartu serveru (ne po /chunk admin reload).
+# POZOR: už existující ostrovy zůstanou ve starém světě - měň to před prvním použitím.
 chunk-world:
-  name: "chunks"
+  name: "chunkbasebase"
   create-if-missing: true
   # Když hráč spadne do voidu, vrátí se na svůj ostrov.
   void-rescue: true
@@ -113,6 +115,23 @@ reset:
   # true = hráči při /chunk reset confirm zmizí všechny věci z inventáře (včetně brnění a offhandu).
   clear-inventory: true
 
+# Co se stane, když admin smaže ostrov (/chunk admin delete <hráč>).
+# Teleportuje se majitel ostrova (i když je zrovna v jiném světě) a všichni hráči,
+# kteří stojí na smazaném ostrově. Pokud je majitel offline, stane se to při jeho příštím připojení.
+delete:
+  # Kam se hráči teleportují (prázdný world = spawn hlavního světa).
+  location:
+    world: "world"
+    x: 0.5
+    y: 100.0
+    z: 0.5
+    yaw: 0.0
+    pitch: 0.0
+  # Příkazy spuštěné po teleportu. "[console] cmd" (výchozí) nebo "[player] cmd", %player% = jméno.
+  commands: []
+  #  - "[console] spawn %player%"
+  #  - "[player] spawn"
+
 unlock:
   # true = do odemykání se nepočítají itemy se jménem/lorem/enchanty.
   strict-items: true
@@ -167,6 +186,9 @@ unlock:
 
 # Vzhled cedulek u zamčených chunků.
 panel:
+  # true = hologramy stojí rovně na místě (otočené k odemčenému chunku) a netočí se za hráčem.
+  # false = točí se za hráčem kolem svislé osy.
+  fixed: true
   height: 1.0
   offset: 1.5
   title-scale: 2.0
@@ -198,6 +220,6 @@ world-commands:
   "*":
     mode: NONE
     list: []
-  chunks:
+  chunkbasebase:
     mode: BLACKLIST
     list: [spawn, home, tpa, warp]

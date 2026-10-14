@@ -72,6 +72,7 @@ public final class Settings {
     public final float itemScale;
     public final double itemSpacing;
     public final float viewRange;
+    public final boolean panelFixed;
 
     // členové
     public final int maxMembers;
@@ -89,7 +90,7 @@ public final class Settings {
     private final Map<String, CommandRule> commandRules = new HashMap<>();
 
     public Settings(FileConfiguration cfg, Logger log) {
-        worldName = cfg.getString("chunk-world.name", "chunks");
+        worldName = cfg.getString("chunk-world.name", "chunkbasebase");
         createWorld = cfg.getBoolean("chunk-world.create-if-missing", true);
         voidRescue = cfg.getBoolean("chunk-world.void-rescue", true);
         voidRescueY = cfg.getInt("chunk-world.void-rescue-below-y", 20);
@@ -120,6 +121,7 @@ public final class Settings {
         itemScale = (float) cfg.getDouble("panel.item-scale", 0.9);
         itemSpacing = cfg.getDouble("panel.item-spacing", 1.3);
         viewRange = (float) cfg.getDouble("panel.view-range", 0.6);
+        panelFixed = cfg.getBoolean("panel.fixed", true);
 
         maxMembers = Math.max(0, cfg.getInt("members.max-members", 5));
         inviteExpireSeconds = Math.max(5, cfg.getInt("members.invite-expire-seconds", 60));

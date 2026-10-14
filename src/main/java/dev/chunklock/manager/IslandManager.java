@@ -23,6 +23,7 @@ import org.bukkit.scheduler.BukkitRunnable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -42,6 +43,8 @@ public final class IslandManager {
     private final Map<Long, Island> bySlot = new HashMap<>();
     private final Map<UUID, UUID> active = new HashMap<>();
     private final Random random = new Random();
+    /** Majitelé smazaných ostrovů, kteří byli offline - při připojení je teleportuje na delete.location. */
+    private final Set<UUID> pendingDelete = new HashSet<>();
     private int nextSlot;
     private int spacing;
     private World world;
@@ -60,6 +63,7 @@ public final class IslandManager {
         Storage.State state = plugin.storage().loadState(configured);
         nextSlot = state.nextSlot();
         active.putAll(state.active());
+        pendingDelete.addAll(plugin.storage().loadPendingDelete());
 
         for (Island island : plugin.storage().loadIslands()) {
             islands.put(island.owner(), island);
@@ -404,35 +408,55 @@ public final class IslandManager {
         return out;
     }
 
-    /** Kam poslat hráče při resetu: svět + souřadnice z configu (sekce reset.location). */
-    private Location resetLocation() {
+    /** Kam poslat hráče: svět + souřadnice z configu (sekce "reset" nebo "delete", podklíč location). */
+    private Location configLocation(String section) {
         FileConfiguration cfg = plugin.getConfig();
-        String worldName = cfg.getString("reset.location.world", "").trim();
+        String path = section + ".location";
+        String worldName = cfg.getString(path + ".world", "").trim();
         World w = worldName.isEmpty() ? null : Bukkit.getWorld(worldName);
         if (w == null) {
             if (!worldName.isEmpty()) {
-                plugin.getLogger().warning("reset.location.world '" + worldName + "' neexistuje, používám spawn hlavního světa.");
+                plugin.getLogger().warning(path + ".world '" + worldName + "' neexistuje, používám spawn hlavního světa.");
             }
             return Bukkit.getWorlds().get(0).getSpawnLocation();
         }
         return new Location(w,
-                cfg.getDouble("reset.location.x", w.getSpawnLocation().getX()),
-                cfg.getDouble("reset.location.y", w.getSpawnLocation().getY()),
-                cfg.getDouble("reset.location.z", w.getSpawnLocation().getZ()),
-                (float) cfg.getDouble("reset.location.yaw", 0),
-                (float) cfg.getDouble("reset.location.pitch", 0));
+                cfg.getDouble(path + ".x", w.getSpawnLocation().getX()),
+                cfg.getDouble(path + ".y", w.getSpawnLocation().getY()),
+                cfg.getDouble(path + ".z", w.getSpawnLocation().getZ()),
+                (float) cfg.getDouble(path + ".yaw", 0),
+                (float) cfg.getDouble(path + ".pitch", 0));
     }
 
     /** Pošle hráče na místo pro reset a po teleportu spustí příkazy z configu (reset.commands). */
     private void sendToReset(Player player) {
-        player.teleportAsync(resetLocation()).thenAccept(ok ->
-                Bukkit.getScheduler().runTask(plugin, () -> runResetCommands(player)));
+        sendTo(player, "reset");
+    }
+
+    /** Pošle hráče na místo po smazání ostrova (delete.location) a spustí delete.commands. */
+    private void sendToDelete(Player player) {
+        sendTo(player, "delete");
+    }
+
+    private void sendTo(Player player, String section) {
+        player.teleportAsync(configLocation(section)).thenAccept(ok ->
+                Bukkit.getScheduler().runTask(plugin, () -> runCommands(player, section + ".commands")));
+    }
+
+    /** Volá se při připojení hráče: pokud mu byl ostrov smazán v offline, teleportuje ho. */
+    public boolean applyPendingDelete(Player player) {
+        if (!pendingDelete.remove(player.getUniqueId())) return false;
+        plugin.storage().savePendingDelete(pendingDelete);
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if (player.isOnline()) sendToDelete(player);
+        }, 5L);
+        return true;
     }
 
     /** Příkazy: "[console] cmd" (výchozí) nebo "[player] cmd"; %player% = jméno hráče. */
-    private void runResetCommands(Player player) {
+    private void runCommands(Player player, String path) {
         if (!player.isOnline()) return;
-        for (String raw : plugin.getConfig().getStringList("reset.commands")) {
+        for (String raw : plugin.getConfig().getStringList(path)) {
             String line = raw.trim();
             if (line.isEmpty()) continue;
             boolean asPlayer = false;
@@ -467,7 +491,21 @@ public final class IslandManager {
     }
 
     public void deleteIsland(Island island) {
-        for (Player p : playersInside(island)) sendToSafe(p, island);
+        // hráči stojící na ostrově + majitel (ať je kdekoliv) se teleportují na delete.location
+        Set<UUID> targets = new LinkedHashSet<>();
+        for (Player p : playersInside(island)) targets.add(p.getUniqueId());
+        targets.add(island.owner());
+        boolean pendingChanged = false;
+        for (UUID id : targets) {
+            Player p = Bukkit.getPlayer(id);
+            if (p != null) {
+                sendToDelete(p);
+            } else if (id.equals(island.owner())) {
+                pendingDelete.add(id); // majitel je offline - teleport proběhne při připojení
+                pendingChanged = true;
+            }
+        }
+        if (pendingChanged) plugin.storage().savePendingDelete(pendingDelete);
         plugin.panels().remove(island.owner());
         islands.remove(island.owner());
         bySlot.remove(slotKey(island.gridX(), island.gridZ()));

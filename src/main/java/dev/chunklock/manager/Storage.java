@@ -13,8 +13,10 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.logging.Level;
 
@@ -26,6 +28,7 @@ public final class Storage {
     private final ChunkLockPlugin plugin;
     private final File islandsDir;
     private final File stateFile;
+    private final File pendingFile;
     private final Object writeLock = new Object();
 
     public Storage(ChunkLockPlugin plugin) {
@@ -33,6 +36,7 @@ public final class Storage {
         File dataDir = new File(plugin.getDataFolder(), "data");
         this.islandsDir = new File(dataDir, "islands");
         this.stateFile = new File(dataDir, "state.yml");
+        this.pendingFile = new File(dataDir, "pending-delete.yml");
         if (!islandsDir.exists() && !islandsDir.mkdirs()) {
             plugin.getLogger().severe("Nelze vytvořit složku " + islandsDir);
         }
@@ -169,6 +173,32 @@ public final class Storage {
             return;
         }
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> write(y, stateFile));
+    }
+
+    /** Majitelé smazaných ostrovů, které je potřeba teleportovat po připojení. */
+    public Set<UUID> loadPendingDelete() {
+        Set<UUID> out = new HashSet<>();
+        YamlConfiguration y = YamlConfiguration.loadConfiguration(pendingFile);
+        for (String s : y.getStringList("players")) {
+            try {
+                out.add(UUID.fromString(s));
+            } catch (IllegalArgumentException ignored) {
+                // poškozený záznam
+            }
+        }
+        return out;
+    }
+
+    public void savePendingDelete(Set<UUID> players) {
+        YamlConfiguration y = new YamlConfiguration();
+        List<String> list = new ArrayList<>();
+        for (UUID id : players) list.add(id.toString());
+        y.set("players", list);
+        if (!plugin.isEnabled()) {
+            write(y, pendingFile);
+            return;
+        }
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> write(y, pendingFile));
     }
 
     public void deleteIsland(UUID owner) {

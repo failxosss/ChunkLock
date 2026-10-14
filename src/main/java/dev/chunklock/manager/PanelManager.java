@@ -185,13 +185,15 @@ public final class PanelManager {
             tz = 0;
         }
         double base = s.surfaceY + 1 + s.panelHeight;
+        // cedulka je natočená k odemčenému sousedovi (tam stojí hráči); 0 = jih, 90 = západ, 180 = sever, -90 = východ
+        final float yaw = dir[1] > 0 ? 0f : dir[1] < 0 ? 180f : dir[0] < 0 ? 90f : -90f;
 
         List<Settings.Requirement> items = plugin.unlocks().requirements(island, locked);
         int n = items.size();
 
         // titulek
         Messages msg = plugin.messages();
-        panel.entities.add(text(w, new Location(w, px, base + 2.6, pz), msg.get("panel.title"), s.titleScale));
+        panel.entities.add(text(w, new Location(w, px, base + 2.6, pz), msg.get("panel.title"), s.titleScale, yaw));
 
         // itemy + počty
         for (int i = 0; i < n; i++) {
@@ -199,17 +201,17 @@ public final class PanelManager {
             double off = (i - (n - 1) / 2.0) * s.itemSpacing;
             double x = px + tx * off;
             double z = pz + tz * off;
-            panel.entities.add(item(w, new Location(w, x, base + 1.6, z), r.material()));
-            TextDisplay counter = text(w, new Location(w, x, base + 0.9, z), counter(island, locked, r), 1.0f);
+            panel.entities.add(item(w, new Location(w, x, base + 1.6, z), r.material(), yaw));
+            TextDisplay counter = text(w, new Location(w, x, base + 0.9, z), counter(island, locked, r), 1.0f, yaw);
             panel.entities.add(counter);
             panel.counters.put(r.material(), counter);
         }
 
         // spodní text
-        panel.footer = text(w, new Location(w, px, base, pz), footer(island, locked), 1.0f);
+        panel.footer = text(w, new Location(w, px, base, pz), footer(island, locked), 1.0f, yaw);
         panel.entities.add(panel.footer);
         if (plugin.unlocks().moneyAvailable(island)) {
-            panel.moneyLine = text(w, new Location(w, px, base - 0.3, pz), moneyText(island, locked), 1.0f);
+            panel.moneyLine = text(w, new Location(w, px, base - 0.3, pz), moneyText(island, locked), 1.0f, yaw);
             panel.entities.add(panel.moneyLine);
         }
 
@@ -244,11 +246,17 @@ public final class PanelManager {
         return plugin.messages().get("panel.footer-money", ph("price", price));
     }
 
-    private TextDisplay text(World w, Location loc, Component content, float scale) {
+    private Display.Billboard billboard() {
+        return plugin.settings().panelFixed ? Display.Billboard.FIXED : Display.Billboard.VERTICAL;
+    }
+
+    private TextDisplay text(World w, Location loc, Component content, float scale, float yaw) {
         float viewRange = plugin.settings().viewRange;
+        loc.setYaw(yaw);
+        loc.setPitch(0f);
         return w.spawn(loc, TextDisplay.class, d -> {
             d.text(content);
-            d.setBillboard(Display.Billboard.VERTICAL);
+            d.setBillboard(billboard());
             d.setPersistent(false);
             d.setBackgroundColor(Color.fromARGB(0, 0, 0, 0));
             d.setShadowed(true);
@@ -260,13 +268,15 @@ public final class PanelManager {
         });
     }
 
-    private ItemDisplay item(World w, Location loc, Material material) {
+    private ItemDisplay item(World w, Location loc, Material material, float yaw) {
         float scale = plugin.settings().itemScale;
         float viewRange = plugin.settings().viewRange;
+        loc.setYaw(yaw);
+        loc.setPitch(0f);
         return w.spawn(loc, ItemDisplay.class, d -> {
             d.setItemStack(new ItemStack(material));
             d.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.GUI);
-            d.setBillboard(Display.Billboard.VERTICAL);
+            d.setBillboard(billboard());
             d.setPersistent(false);
             d.setViewRange(viewRange);
             d.setTransformation(new Transformation(new Vector3f(), new Quaternionf(),

@@ -24,6 +24,8 @@ Na GitHubu se plugin sestaví sám (záložka **Actions** -> poslední běh -> *
 | `/chunk permission <hráč> [oprávnění] [true/false]` | bez oprávnění otevře menu |
 | `/chunk kick <hráč>`, `/chunk leave` | vyhodit člena / odejít |
 | `/chunk reset confirm` | smazat vlastní chunk a začít znovu |
+
+> `/chunk admin delete <hráč>` teleportuje majitele (a hráče na ostrově) na `delete.location` z configu a spustí `delete.commands`. Svět pro chunky se nastavuje v `chunk-world.name` (výchozí `chunkbasebase`).
 | `/chunk admin reload\|tp\|unlock\|delete` | admin (`chunklock.admin`) |
 
 Oprávnění členů: `build, break, interact, containers, animals, unlock, invite`.

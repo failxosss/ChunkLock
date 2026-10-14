@@ -44,6 +44,9 @@ public final class PlayerListener implements Listener {
             }
         }
 
+        // ostrov mu byl smazán adminem, když byl offline - teleport na delete.location
+        if (plugin.islands().applyPendingDelete(player)) return;
+
         // hráč se odhlásil v chunk světě na ostrově, kam už nepatří
         if (plugin.islands().isChunkWorld(player.getWorld())) {
             Plot plot = plugin.islands().plotAt(player.getLocation());
