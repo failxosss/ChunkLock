@@ -1,0 +1,140 @@
+# ChunkLock - zprávy (MiniMessage formát)
+prefix: "<dark_gray>[<green>Chunk<dark_gray>]<reset> "
+
+only-players: "<prefix><red>Tento příkaz může použít jen hráč."
+no-permission: "<prefix><red>Na to nemáš oprávnění."
+world-disabled: "<prefix><red>V tomhle světě nejde použít /chunk."
+commands-blocked: "<prefix><red>Tento příkaz tady nejde použít."
+created: "<prefix><green>Tvůj chunk byl vytvořen!"
+teleported: "<prefix><gray>Teleportován na chunk hráče <yellow><owner><gray>."
+no-active-island: "<prefix><red>Nemáš žádný chunk. Napiš <white>/chunk<red>."
+no-invite-permission: "<prefix><red>Nemáš oprávnění zvát hráče."
+player-not-found: "<prefix><red>Hráč není online."
+cannot-self: "<prefix><red>Nemůžeš pozvat sám sebe."
+already-member: "<prefix><red>Tenhle hráč už na chunku je."
+island-full: "<prefix><red>Chunk už má maximum členů."
+
+help:
+  - "<gold><bold>ChunkLock <gray>- příkazy"
+  - "<yellow>/chunk <gray>- teleport na tvůj chunk"
+  - "<yellow>/chunk home <gray>- teleport na tvůj vlastní chunk"
+  - "<yellow>/chunk info <gray>- informace o chunku"
+  - "<yellow>/chunk invite \\<hráč> <gray>- pozvat kamaráda"
+  - "<yellow>/chunk accept|deny [jméno] <gray>- reakce na pozvánku"
+  - "<yellow>/chunk members <gray>- seznam členů"
+  - "<yellow>/chunk permission \\<hráč> [oprávnění] [true/false] <gray>- oprávnění člena"
+  - "<yellow>/chunk kick \\<hráč> <gray>- vyhodit člena"
+  - "<yellow>/chunk leave <gray>- opustit cizí chunk"
+  - "<yellow>/chunk reset confirm <gray>- smazat a začít znovu"
+
+info:
+  - "<gold><bold>Chunk hráče <yellow><owner>"
+  - "<gray>Odemčeno: <green><unlocked><gray>/<green><max>"
+  - "<gray>Hráčů: <green><members>"
+
+usage:
+  invite: "<prefix><red>Použití: /chunk invite \\<hráč>"
+  kick: "<prefix><red>Použití: /chunk kick \\<hráč>"
+  permission: "<prefix><red>Použití: /chunk permission \\<hráč> [oprávnění] [true/false]"
+  admin: "<prefix><red>Použití: /chunk admin \\<reload|tp|unlock|delete> [hráč] [x] [z]"
+
+members:
+  header: "<gold><bold>Členové chunku"
+  owner: "<gray>- <yellow><owner> <dark_gray>(majitel)"
+  entry: "<gray>- <white><player> <dark_gray>[<gray><perms><dark_gray>]"
+
+invite:
+  sent: "<prefix><green>Pozvánka odeslána hráči <yellow><player><green>."
+  already-invited: "<prefix><red>Tenhle hráč už pozvánku má."
+  received: "<prefix><yellow><inviter> <gray>tě zve na svůj chunk (<seconds> s). <accept> <deny>"
+  accept-button: "<green><bold>[PŘIJMOUT]"
+  deny-button: "<red><bold>[ODMÍTNOUT]"
+  none: "<prefix><red>Nemáš žádnou pozvánku."
+  multiple: "<prefix><gray>Máš více pozvánek, vyber: <yellow><list>"
+  invalid: "<prefix><red>Pozvánka už není platná."
+  accepted: "<prefix><green>Připojil ses na chunk hráče <yellow><owner><green>."
+  joined-notify: "<prefix><yellow><player> <green>se připojil na tvůj chunk."
+  denied: "<prefix><gray>Pozvánka odmítnuta."
+  denied-notify: "<prefix><yellow><player> <gray>odmítl tvou pozvánku."
+
+kick:
+  only-owner: "<prefix><red>Členy může vyhazovat jen majitel chunku."
+  not-member: "<prefix><red>Tenhle hráč není členem tvého chunku."
+  success: "<prefix><green>Hráč <yellow><player> <green>byl vyhozen."
+  kicked: "<prefix><red>Byl jsi vyhozen z chunku hráče <yellow><owner><red>."
+
+leave:
+  owner: "<prefix><red>Majitel nemůže opustit vlastní chunk. Použij /chunk reset."
+  success: "<prefix><gray>Opustil jsi chunk hráče <yellow><owner><gray>."
+  notify: "<prefix><yellow><player> <gray>opustil tvůj chunk."
+
+permission:
+  only-owner: "<prefix><red>Oprávnění může měnit jen majitel chunku."
+  not-member: "<prefix><red>Tenhle hráč není členem tvého chunku."
+  unknown: "<prefix><red>Neznámé oprávnění. Dostupná: <white><perms>"
+  set: "<prefix><gray>Oprávnění <yellow><perm> <gray>pro <white><player><gray>: <value>"
+  enabled: "<green>povoleno"
+  disabled: "<red>zakázáno"
+
+reset:
+  no-island: "<prefix><red>Nemáš žádný chunk."
+  confirm: "<prefix><red>Tímto SMAŽEŠ celý svůj chunk včetně postupu! Potvrď: <white>/chunk reset confirm"
+  started: "<prefix><gray>Resetuji tvůj chunk..."
+  done: "<prefix><green>Chunk byl resetován."
+
+admin:
+  reloaded: "<prefix><green>Konfigurace načtena znovu."
+  no-island: "<prefix><red>Hráč <yellow><player> <red>nemá chunk."
+  unlock-invalid: "<prefix><red>Tenhle chunk nejde odemknout (není vedle odemčeného / je mimo rozsah)."
+  unlocked: "<prefix><green>Chunk <yellow><x>, <z> <green>odemčen."
+  deleted: "<prefix><green>Chunk hráče <yellow><player> <green>smazán."
+
+unlock:
+  not-member: "<prefix><red>Tenhle chunk není tvůj."
+  no-permission: "<prefix><red>Nemáš oprávnění odemykat chunky."
+  not-allowed: "<prefix><red>Tenhle chunk teď nejde odemknout."
+  no-items: "<prefix><red>Nemáš žádné potřebné itemy."
+  delivered: "<prefix><green>Odevzdáno: <yellow><items>"
+  money-disabled: "<prefix><red>Odemčení za peníze není dostupné."
+  not-enough-money: "<prefix><red>Nemáš dost peněz. Potřebuješ <yellow><price><red>."
+  paid: "<prefix><green>Zaplaceno <yellow><price><green>."
+  success: "<prefix><green><bold>Chunk <yellow><x>, <z> <green><bold>byl odemčen!"
+
+protection:
+  locked: "<red>Tenhle chunk je zamčený!"
+  denied: "<red>Na tohle tady nemáš oprávnění."
+
+panel:
+  title: "<red><bold>UZAMČENÝ CHUNK"
+  counter: "<aqua><current> <gray>z <aqua><need>"
+  footer-click: "<white>KLIKNI PRO ODEMČENÍ"
+  footer-money: "<gray>SHIFT + klik: <gold><price>"
+
+gui:
+  title: "<dark_gray>Oprávnění: <player>"
+  allowed: "<green>Povoleno"
+  denied: "<red>Zakázáno"
+  click-hint: "<yellow>Klikni pro přepnutí"
+
+perm:
+  build:
+    name: "Stavění"
+    desc: "Pokládání bloků a vědra."
+  break:
+    name: "Ničení"
+    desc: "Rozbíjení bloků."
+  interact:
+    name: "Interakce"
+    desc: "Dveře, páčky, tlačítka."
+  containers:
+    name: "Truhly"
+    desc: "Otevírání truhel a kontejnerů."
+  animals:
+    name: "Zvířata"
+    desc: "Krmení, chov a zabíjení zvířat."
+  unlock:
+    name: "Odemykání"
+    desc: "Odemykání dalších chunků."
+  invite:
+    name: "Zvaní"
+    desc: "Zvaní dalších hráčů."

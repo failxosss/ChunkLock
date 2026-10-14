@@ -1,0 +1,28 @@
+name: ChunkLock
+version: 1.0.0
+main: dev.chunklock.ChunkLockPlugin
+api-version: "1.21"
+author: Failxos
+description: Vlastní chunk ostrovy - odemykej okolní chunky itemy nebo penězi.
+softdepend: [Vault]
+
+commands:
+  chunk:
+    description: Teleport na tvůj chunk a správa chunku
+    usage: /chunk [help]
+    aliases: [chunks]
+    permission: chunklock.use
+
+permissions:
+  chunklock.use:
+    description: Použití /chunk
+    default: true
+  chunklock.admin:
+    description: Admin příkazy (/chunk admin ...)
+    default: op
+  chunklock.bypass.protection:
+    description: Obejití ochrany chunků a zamčených hranic
+    default: op
+  chunklock.bypass.commands:
+    description: Obejití omezení příkazů podle světa
+    default: op
