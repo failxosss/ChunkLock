@@ -63,6 +63,7 @@ public final class Storage {
             island.unlock(ChunkPos.parse(s));
         }
         if (island.unlockedCount() == 0) island.unlock(new ChunkPos(0, 0));
+        island.setMobSpawning(y.getBoolean("mob-spawning", true));
 
         ConfigurationSection prog = y.getConfigurationSection("progress");
         if (prog != null) {
@@ -119,6 +120,7 @@ public final class Storage {
         y.set("owner-name", is.ownerName());
         y.set("grid-x", is.gridX());
         y.set("grid-z", is.gridZ());
+        y.set("mob-spawning", is.mobSpawning());
 
         List<String> unlocked = new ArrayList<>();
         for (long key : is.unlockedKeys()) unlocked.add(ChunkPos.fromKey(key).serialize());

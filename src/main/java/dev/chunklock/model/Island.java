@@ -44,6 +44,7 @@ public final class Island {
     private final Set<Long> unlocked = new HashSet<>();
     private final Map<Long, Map<Material, Integer>> progress = new HashMap<>();
     private final Map<UUID, Member> members = new LinkedHashMap<>();
+    private boolean mobSpawning = true;
 
     public Island(UUID owner, String ownerName, int gridX, int gridZ) {
         this.owner = owner;
@@ -70,6 +71,14 @@ public final class Island {
 
     public int gridZ() {
         return gridZ;
+    }
+
+    public boolean mobSpawning() {
+        return mobSpawning;
+    }
+
+    public void setMobSpawning(boolean mobSpawning) {
+        this.mobSpawning = mobSpawning;
     }
 
     // ---- chunky ----

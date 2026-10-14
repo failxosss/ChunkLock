@@ -25,6 +25,7 @@ help:
   - "<yellow>/chunk permission \\<hráč> [oprávnění] [true/false] <gray>- oprávnění člena"
   - "<yellow>/chunk kick \\<hráč> <gray>- vyhodit člena"
   - "<yellow>/chunk leave <gray>- opustit cizí chunk"
+  - "<yellow>/chunk mobs [on|off] <gray>- zapnout/vypnout spawn mobů na tvém chunku"
   - "<yellow>/chunk reset confirm <gray>- smazat a začít znovu"
 
 info:
@@ -36,6 +37,7 @@ usage:
   invite: "<prefix><red>Použití: /chunk invite \\<hráč>"
   kick: "<prefix><red>Použití: /chunk kick \\<hráč>"
   permission: "<prefix><red>Použití: /chunk permission \\<hráč> [oprávnění] [true/false]"
+  mobs: "<prefix><red>Použití: /chunk mobs [on|off]"
   admin: "<prefix><red>Použití: /chunk admin \\<reload|tp|unlock|delete> [hráč] [x] [z]"
 
 members:
@@ -89,12 +91,18 @@ admin:
   unlocked: "<prefix><green>Chunk <yellow><x>, <z> <green>odemčen."
   deleted: "<prefix><green>Chunk hráče <yellow><player> <green>smazán."
 
+mobs:
+  owner-only: "<prefix><red>Spawn mobů může měnit jen majitel chunku."
+  enabled: "<prefix><green>Spawnování mobů na tvém chunku je <bold>zapnuté<green>."
+  disabled: "<prefix><green>Spawnování mobů na tvém chunku je <bold>vypnuté<green>."
+
 unlock:
   not-member: "<prefix><red>Tenhle chunk není tvůj."
   no-permission: "<prefix><red>Nemáš oprávnění odemykat chunky."
   not-allowed: "<prefix><red>Tenhle chunk teď nejde odemknout."
   no-items: "<prefix><red>Nemáš žádné potřebné itemy."
   delivered: "<prefix><green>Odevzdáno: <yellow><items>"
+  no-buy-permission: "<prefix><red>Nemáš oprávnění kupovat chunky za peníze."
   money-disabled: "<prefix><red>Odemčení za peníze není dostupné."
   not-enough-money: "<prefix><red>Nemáš dost peněz. Potřebuješ <yellow><price><red>."
   paid: "<prefix><green>Zaplaceno <yellow><price><green>."

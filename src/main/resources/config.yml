@@ -25,10 +25,12 @@ island:
     top-block: GRASS_BLOCK
     filler-block: DIRT
     filler-depth: 3
-    bedrock-bottom: true
+    # Bedrock na dně chunku (false = žádný bedrock, pod chunkem je rovnou void).
+    bedrock-bottom: false
     # Kamenná vrstva pod hlínou (tam se generují rudy) a její tloušťka v blocích.
     stone-block: STONE
-    stone-depth: 24
+    # Výška chunku = 1 (povrch) + filler-depth + stone-depth = 1 + 3 + 56 = 60 bloků.
+    stone-depth: 56
 
   # Stromy ve startovním chunku.
   start-chunk:
@@ -89,14 +91,46 @@ island:
         - { material: DIAMOND_ORE,  amount: 20, chance: 100, vein-size: 3, min-depth: 18, max-depth: 27 }
         - { material: EMERALD_ORE,  amount: 4,  chance: 50,  vein-size: 1, min-depth: 14, max-depth: 27 }
 
+# Co se stane s hráči na ostrově při /chunk reset confirm.
+reset:
+  # Kam se hráči teleportují před smazáním chunku (prázdný world = spawn hlavního světa).
+  location:
+    world: "world"
+    x: 0.5
+    y: 100.0
+    z: 0.5
+    yaw: 0.0
+    pitch: 0.0
+  # Příkazy spuštěné po teleportu. "[console] cmd" (výchozí) nebo "[player] cmd", %player% = jméno.
+  commands: []
+  #  - "[console] spawn %player%"
+  #  - "[player] spawn"
+  # true = po dokončení resetu hráče teleportuje zpátky na nový chunk, false = zůstane na místě výše.
+  teleport-back: true
+  # true = hráči při /chunk reset confirm zmizí všechny věci z inventáře (včetně brnění a offhandu).
+  clear-inventory: true
+
 unlock:
   # true = do odemykání se nepočítají itemy se jménem/lorem/enchanty.
   strict-items: true
+  # Každý zamčený chunk má jiné požadavky. Položky tieru níž fungují jako zásobník,
+  # ze kterého se pro každý chunk (stabilně) vybere jiná kombinace a množství.
+  variation:
+    enabled: true
+    # Kolik různých itemů bude chunk vyžadovat (min..max, ořízne se na velikost zásobníku).
+    min-items: 2
+    max-items: 3
+    # Množství se náhodně mění o +/- tolik procent (0 = vždy přesně podle tieru).
+    amount-variance: 30
   money:
     # Odemčení za peníze (shift + klik na cedulku). Vyžaduje Vault + ekonomiku.
     enabled: true
     # Cena se snižuje podle už odevzdaných itemů.
     reduce-by-progress: true
+    # Permise potřebná pro nákup za peníze (SHIFT + klik). Hráči/skupiny bez ní
+    # cenu na cedulce vůbec neuvidí a nemůžou platit. Prázdné = smí každý.
+    # Příklad: "chunklock.buy" a pak ji dej skupině v LuckPerms.
+    permission: ""
   # Požadavky podle počtu už odemčených chunků ("from").
   tiers:
     - from: 0
@@ -106,6 +140,12 @@ unlock:
           amount: 250
         - material: OAK_LOG
           amount: 22
+        - material: IRON_INGOT
+          amount: 150
+        - material: COAL
+          amount: 192
+        - material: COPPER_INGOT
+          amount: 200
     - from: 5
       money: 12000
       items:
@@ -115,6 +155,12 @@ unlock:
           amount: 40
         - material: IRON_INGOT
           amount: 200
+        - material: DIAMOND
+          amount: 24
+        - material: LAPIS_LAZULI
+          amount: 128
+        - material: REDSTONE
+          amount: 256
 
 # Vzhled cedulek u zamčených chunků.
 panel:

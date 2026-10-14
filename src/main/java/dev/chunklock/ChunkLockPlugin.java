@@ -5,6 +5,7 @@ import dev.chunklock.config.Messages;
 import dev.chunklock.config.Settings;
 import dev.chunklock.listener.CommandListener;
 import dev.chunklock.listener.GuiListener;
+import dev.chunklock.listener.MobListener;
 import dev.chunklock.listener.MovementListener;
 import dev.chunklock.listener.PanelListener;
 import dev.chunklock.listener.PlayerListener;
@@ -50,6 +51,7 @@ public final class ChunkLockPlugin extends JavaPlugin {
 
         getServer().getPluginManager().registerEvents(new ProtectionListener(this), this);
         getServer().getPluginManager().registerEvents(new MovementListener(this), this);
+        getServer().getPluginManager().registerEvents(new MobListener(this), this);
         getServer().getPluginManager().registerEvents(new PanelListener(this), this);
         getServer().getPluginManager().registerEvents(new PlayerListener(this), this);
         getServer().getPluginManager().registerEvents(new CommandListener(this), this);

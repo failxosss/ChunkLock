@@ -46,6 +46,7 @@ public final class PanelManager {
         final List<Entity> entities = new ArrayList<>();
         final Map<Material, TextDisplay> counters = new LinkedHashMap<>();
         TextDisplay footer;
+        TextDisplay moneyLine;
         Interaction hitbox;
 
         Panel(ChunkPos rel) {
@@ -82,6 +83,19 @@ public final class PanelManager {
             }
         }
         panels.put(island.owner(), list);
+        World w = im.world();
+        for (Player p : w.getPlayers()) syncVisibility(p, list);
+    }
+
+    /** Řádek s cenou vidí jen hráči s permisí pro nákup za peníze. */
+    private void syncVisibility(Player player, List<Panel> list) {
+        boolean canSee = plugin.unlocks().canPay(player);
+        for (Panel panel : list) {
+            TextDisplay line = panel.moneyLine;
+            if (line == null || !line.isValid()) continue;
+            if (canSee) player.showEntity(plugin, line);
+            else player.hideEntity(plugin, line);
+        }
     }
 
     public void ensure(Island island) {
@@ -114,6 +128,8 @@ public final class PanelManager {
             if (plot == null) continue;
             present.add(plot.island().owner());
             ensure(plot.island());
+            List<Panel> list = panels.get(plot.island().owner());
+            if (list != null) syncVisibility(p, list);
         }
         for (UUID owner : new ArrayList<>(panels.keySet())) {
             if (!present.contains(owner)) remove(owner);
@@ -131,14 +147,15 @@ public final class PanelManager {
     public void refresh(Island island, ChunkPos rel) {
         List<Panel> list = panels.get(island.owner());
         if (list == null) return;
-        Settings.Tier tier = plugin.unlocks().tierFor(island);
+        List<Settings.Requirement> reqs = plugin.unlocks().requirements(island, rel);
         for (Panel p : list) {
             if (!p.rel.equals(rel)) continue;
-            for (Settings.Requirement r : tier.items()) {
+            for (Settings.Requirement r : reqs) {
                 TextDisplay d = p.counters.get(r.material());
                 if (d != null && d.isValid()) d.text(counter(island, rel, r));
             }
             if (p.footer != null && p.footer.isValid()) p.footer.text(footer(island, rel));
+            if (p.moneyLine != null && p.moneyLine.isValid()) p.moneyLine.text(moneyText(island, rel));
         }
     }
 
@@ -169,8 +186,7 @@ public final class PanelManager {
         }
         double base = s.surfaceY + 1 + s.panelHeight;
 
-        Settings.Tier tier = plugin.unlocks().tierFor(island);
-        List<Settings.Requirement> items = tier.items();
+        List<Settings.Requirement> items = plugin.unlocks().requirements(island, locked);
         int n = items.size();
 
         // titulek
@@ -192,6 +208,10 @@ public final class PanelManager {
         // spodní text
         panel.footer = text(w, new Location(w, px, base, pz), footer(island, locked), 1.0f);
         panel.entities.add(panel.footer);
+        if (plugin.unlocks().moneyAvailable(island)) {
+            panel.moneyLine = text(w, new Location(w, px, base - 0.3, pz), moneyText(island, locked), 1.0f);
+            panel.entities.add(panel.moneyLine);
+        }
 
         // klikací hitbox
         float width = (float) Math.max(2.5, n * s.itemSpacing + 0.5);
@@ -215,13 +235,13 @@ public final class PanelManager {
 
     private Component footer(Island island, ChunkPos rel) {
         Messages msg = plugin.messages();
-        Component c = msg.get("panel.footer-click");
+        return msg.get("panel.footer-click");
+    }
+
+    private Component moneyText(Island island, ChunkPos rel) {
         UnlockService unlocks = plugin.unlocks();
-        if (unlocks.moneyAvailable(island)) {
-            String price = unlocks.formatPrice(unlocks.price(island, rel));
-            c = c.append(Component.newline()).append(msg.get("panel.footer-money", ph("price", price)));
-        }
-        return c;
+        String price = unlocks.formatPrice(unlocks.price(island, rel));
+        return plugin.messages().get("panel.footer-money", ph("price", price));
     }
 
     private TextDisplay text(World w, Location loc, Component content, float scale) {

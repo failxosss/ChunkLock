@@ -15,6 +15,7 @@ import org.bukkit.World;
 import org.bukkit.WorldCreator;
 import org.bukkit.WorldType;
 import org.bukkit.block.Block;
+import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitRunnable;
@@ -402,8 +403,54 @@ public final class IslandManager {
         return out;
     }
 
+    /** Kam poslat hráče při resetu: svět + souřadnice z configu (sekce reset.location). */
+    private Location resetLocation() {
+        FileConfiguration cfg = plugin.getConfig();
+        String worldName = cfg.getString("reset.location.world", "").trim();
+        World w = worldName.isEmpty() ? null : Bukkit.getWorld(worldName);
+        if (w == null) {
+            if (!worldName.isEmpty()) {
+                plugin.getLogger().warning("reset.location.world '" + worldName + "' neexistuje, používám spawn hlavního světa.");
+            }
+            return Bukkit.getWorlds().get(0).getSpawnLocation();
+        }
+        return new Location(w,
+                cfg.getDouble("reset.location.x", w.getSpawnLocation().getX()),
+                cfg.getDouble("reset.location.y", w.getSpawnLocation().getY()),
+                cfg.getDouble("reset.location.z", w.getSpawnLocation().getZ()),
+                (float) cfg.getDouble("reset.location.yaw", 0),
+                (float) cfg.getDouble("reset.location.pitch", 0));
+    }
+
+    /** Pošle hráče na místo pro reset a po teleportu spustí příkazy z configu (reset.commands). */
+    private void sendToReset(Player player) {
+        player.teleportAsync(resetLocation()).thenAccept(ok ->
+                Bukkit.getScheduler().runTask(plugin, () -> runResetCommands(player)));
+    }
+
+    /** Příkazy: "[console] cmd" (výchozí) nebo "[player] cmd"; %player% = jméno hráče. */
+    private void runResetCommands(Player player) {
+        if (!player.isOnline()) return;
+        for (String raw : plugin.getConfig().getStringList("reset.commands")) {
+            String line = raw.trim();
+            if (line.isEmpty()) continue;
+            boolean asPlayer = false;
+            if (line.regionMatches(true, 0, "[player]", 0, 8)) {
+                asPlayer = true;
+                line = line.substring(8).trim();
+            } else if (line.regionMatches(true, 0, "[console]", 0, 9)) {
+                line = line.substring(9).trim();
+            }
+            if (line.startsWith("/")) line = line.substring(1);
+            line = line.replace("%player%", player.getName());
+            if (line.isEmpty()) continue;
+            if (asPlayer) player.performCommand(line);
+            else Bukkit.dispatchCommand(Bukkit.getConsoleSender(), line);
+        }
+    }
+
     public void resetIsland(Island island, Player initiator) {
-        for (Player p : playersInside(island)) sendToSafe(p, island);
+        for (Player p : playersInside(island)) sendToReset(p);
         plugin.panels().remove(island.owner());
         Bukkit.getScheduler().runTaskLater(plugin, () -> clearIsland(island, () -> {
             island.reset();
@@ -411,7 +458,9 @@ public final class IslandManager {
             plugin.storage().saveIsland(island);
             if (initiator.isOnline()) {
                 plugin.messages().send(initiator, "reset.done");
-                teleport(initiator, island, null);
+                if (plugin.getConfig().getBoolean("reset.teleport-back", true)) {
+                    teleport(initiator, island, null);
+                }
             }
         }), 20L);
     }

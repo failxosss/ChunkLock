@@ -6,7 +6,9 @@ import dev.chunklock.model.IslandPermission;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 import org.bukkit.block.Container;
+import org.bukkit.block.data.Directional;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Enemy;
 import org.bukkit.entity.Entity;
@@ -20,11 +22,22 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockBurnEvent;
+import org.bukkit.event.block.BlockDispenseEvent;
 import org.bukkit.event.block.BlockExplodeEvent;
+import org.bukkit.event.block.BlockFormEvent;
+import org.bukkit.event.block.BlockFromToEvent;
+import org.bukkit.event.block.BlockIgniteEvent;
+import org.bukkit.event.block.BlockPistonExtendEvent;
+import org.bukkit.event.block.BlockPistonRetractEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityChangeBlockEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
+import org.bukkit.event.entity.EntityPlaceEvent;
 import org.bukkit.event.hanging.HangingBreakByEntityEvent;
+import org.bukkit.event.hanging.HangingPlaceEvent;
+import org.bukkit.event.world.StructureGrowEvent;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
 import org.bukkit.event.player.PlayerBucketFillEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
@@ -64,6 +77,18 @@ public final class ProtectionListener implements Listener {
         return true;
     }
 
+    /** Je na dané pozici zamčený chunk (nebo mimo ostrov) v chunk světě? */
+    private boolean lockedAt(Location loc) {
+        if (loc == null || loc.getWorld() == null) return false;
+        if (!plugin.islands().isChunkWorld(loc.getWorld())) return false;
+        Plot plot = plugin.islands().plotAt(loc);
+        return plot == null || !plot.island().isUnlocked(plot.rel());
+    }
+
+    private boolean lockedAt(Block block) {
+        return lockedAt(block.getLocation());
+    }
+
     private void deny(Player player, String key) {
         long now = System.currentTimeMillis();
         Long last = lastMessage.get(player.getUniqueId());
@@ -86,7 +111,10 @@ public final class ProtectionListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onBucketEmpty(PlayerBucketEmptyEvent e) {
-        if (!allowed(e.getPlayer(), e.getBlock().getLocation(), IslandPermission.BUILD, true)) e.setCancelled(true);
+        if (!allowed(e.getPlayer(), e.getBlock().getLocation(), IslandPermission.BUILD, true)
+                || !allowed(e.getPlayer(), e.getBlockClicked().getLocation(), IslandPermission.BUILD, true)) {
+            e.setCancelled(true);
+        }
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
@@ -177,19 +205,140 @@ public final class ProtectionListener implements Listener {
         }
     }
 
-    // ---------------------------------------------------------------- výbuchy
-
-    @EventHandler(ignoreCancelled = true)
-    public void onEntityExplode(EntityExplodeEvent e) {
-        if (!plugin.settings().explosions && plugin.islands().isChunkWorld(e.getLocation().getWorld())) {
-            e.blockList().clear();
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onHangingPlace(HangingPlaceEvent e) {
+        Player p = e.getPlayer();
+        if (p != null) {
+            if (!allowed(p, e.getEntity().getLocation(), IslandPermission.BUILD, true)) e.setCancelled(true);
+        } else if (lockedAt(e.getEntity().getLocation())) {
+            e.setCancelled(true);
         }
     }
 
-    @EventHandler(ignoreCancelled = true)
-    public void onBlockExplode(BlockExplodeEvent e) {
-        if (!plugin.settings().explosions && plugin.islands().isChunkWorld(e.getBlock().getWorld())) {
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onEntityPlace(EntityPlaceEvent e) {
+        Player p = e.getPlayer();
+        if (p != null) {
+            if (!allowed(p, e.getEntity().getLocation(), IslandPermission.BUILD, true)) e.setCancelled(true);
+        } else if (lockedAt(e.getEntity().getLocation())) {
+            e.setCancelled(true);
+        }
+    }
+
+    // ---------------------------------------------------------------- zamčené chunky: automatika, voda, růst
+
+    /** Voda / láva / dračí vejce nesmí téct do zamčeného chunku (ani na jiný ostrov). */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onFluidFlow(BlockFromToEvent e) {
+        Block from = e.getBlock();
+        Block to = e.getToBlock();
+        if (!plugin.islands().isChunkWorld(from.getWorld())) return;
+
+        Plot target = plugin.islands().plotAt(to.getLocation());
+        if (target == null || !target.island().isUnlocked(target.rel())) {
+            e.setCancelled(true);
+            return;
+        }
+        // tok mezi dvěma různými ostrovy zakázat
+        if ((from.getX() >> 4) != (to.getX() >> 4) || (from.getZ() >> 4) != (to.getZ() >> 4)) {
+            Plot source = plugin.islands().plotAt(from.getLocation());
+            if (source == null || source.island() != target.island()) e.setCancelled(true);
+        }
+    }
+
+    /** Dispenser nesmí vylít vodu/lávu, položit blok, vyvolat entitu apod. do zamčeného chunku. */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onDispense(BlockDispenseEvent e) {
+        Block b = e.getBlock();
+        if (!plugin.islands().isChunkWorld(b.getWorld())) return;
+        if (lockedAt(b)) {
+            e.setCancelled(true);
+            return;
+        }
+        if (b.getBlockData() instanceof Directional d) {
+            if (lockedAt(b.getRelative(d.getFacing()))) e.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onPistonExtend(BlockPistonExtendEvent e) {
+        if (!plugin.islands().isChunkWorld(e.getBlock().getWorld())) return;
+        BlockFace dir = e.getDirection();
+        if (lockedAt(e.getBlock().getRelative(dir))) {
+            e.setCancelled(true);
+            return;
+        }
+        for (Block moved : e.getBlocks()) {
+            if (lockedAt(moved) || lockedAt(moved.getRelative(dir))) {
+                e.setCancelled(true);
+                return;
+            }
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onPistonRetract(BlockPistonRetractEvent e) {
+        if (!plugin.islands().isChunkWorld(e.getBlock().getWorld())) return;
+        BlockFace dir = e.getDirection();
+        for (Block moved : e.getBlocks()) {
+            if (lockedAt(moved) || lockedAt(moved.getRelative(dir))) {
+                e.setCancelled(true);
+                return;
+            }
+        }
+    }
+
+    /** Vznik/šíření bloků: led, sníh, obsidián, beton, tráva, houby, sculk, oheň... */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onBlockForm(BlockFormEvent e) {
+        if (lockedAt(e.getBlock())) e.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onIgnite(BlockIgniteEvent e) {
+        if (lockedAt(e.getBlock())) e.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onBurn(BlockBurnEvent e) {
+        if (lockedAt(e.getBlock())) e.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onStructureGrow(StructureGrowEvent e) {
+        if (!plugin.islands().isChunkWorld(e.getWorld())) return;
+        if (lockedAt(e.getLocation())) {
+            e.setCancelled(true);
+            return;
+        }
+        e.getBlocks().removeIf(state -> lockedAt(state.getLocation()));
+    }
+
+    /** Padající bloky, endermani, atd. nesmí měnit bloky v zamčeném chunku. */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onEntityChangeBlock(EntityChangeBlockEvent e) {
+        if (lockedAt(e.getBlock())) e.setCancelled(true);
+    }
+
+    // ---------------------------------------------------------------- výbuchy
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onEntityExplode(EntityExplodeEvent e) {
+        if (!plugin.islands().isChunkWorld(e.getLocation().getWorld())) return;
+        if (!plugin.settings().explosions) {
             e.blockList().clear();
+        } else {
+            e.blockList().removeIf(this::lockedAt);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onBlockExplode(BlockExplodeEvent e) {
+        if (!plugin.islands().isChunkWorld(e.getBlock().getWorld())) return;
+        if (!plugin.settings().explosions) {
+            e.blockList().clear();
+        } else {
+            e.blockList().removeIf(this::lockedAt);
         }
     }
 }

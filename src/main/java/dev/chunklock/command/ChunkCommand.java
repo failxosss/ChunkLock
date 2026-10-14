@@ -12,10 +12,13 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Bukkit;
+import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
+import org.bukkit.entity.Enemy;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 
 import java.util.ArrayList;
@@ -30,7 +33,7 @@ import static dev.chunklock.config.Messages.ph;
 public final class ChunkCommand implements CommandExecutor, TabCompleter {
 
     private static final List<String> SUBS = List.of("home", "info", "invite", "accept", "deny", "kick",
-            "leave", "members", "permission", "reset", "help");
+            "leave", "members", "permission", "mobs", "reset", "help");
     private static final List<String> ADMIN_SUBS = List.of("reload", "tp", "unlock", "delete");
 
     private final ChunkLockPlugin plugin;
@@ -75,6 +78,7 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
             case "leave" -> leave(p);
             case "members" -> members(p);
             case "permission", "permissions", "perm" -> permission(p, args);
+            case "mobs" -> mobs(p, args);
             case "reset" -> reset(p, args);
             default -> msg().sendList(p, "help");
         }
@@ -364,8 +368,56 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
             msg().send(p, "reset.confirm");
             return;
         }
+        if (plugin.getConfig().getBoolean("reset.clear-inventory", true)) {
+            p.getInventory().clear();
+            p.setItemOnCursor(null);
+        }
         msg().send(p, "reset.started");
         islands().resetIsland(island, p);
+    }
+
+    // ------------------------------------------------------------------ mobové
+
+    /** /chunk mobs [on|off] - zapne/vypne spawnování mobů na vlastním chunku. */
+    private void mobs(Player p, String[] args) {
+        Island island = islands().byOwner(p.getUniqueId());
+        if (island == null) {
+            msg().send(p, "mobs.owner-only");
+            return;
+        }
+        boolean value;
+        if (args.length >= 2) {
+            String a = args[1].toLowerCase(Locale.ROOT);
+            if (a.equals("on") || a.equals("true")) value = true;
+            else if (a.equals("off") || a.equals("false")) value = false;
+            else {
+                msg().send(p, "usage.mobs");
+                return;
+            }
+        } else {
+            value = !island.mobSpawning();
+        }
+        island.setMobSpawning(value);
+        plugin.storage().saveIsland(island);
+        if (!value) removeHostileMobs(island);
+        msg().send(p, value ? "mobs.enabled" : "mobs.disabled");
+    }
+
+    /** Odstraní nepřátelské moby (bez jména) z načtených odemčených chunků ostrova. */
+    private void removeHostileMobs(Island island) {
+        World world = islands().world();
+        if (world == null) return;
+        int cx = islands().centerChunkX(island);
+        int cz = islands().centerChunkZ(island);
+        for (long key : island.unlockedKeys()) {
+            ChunkPos rel = ChunkPos.fromKey(key);
+            int x = cx + rel.x();
+            int z = cz + rel.z();
+            if (!world.isChunkLoaded(x, z)) continue;
+            for (Entity e : world.getChunkAt(x, z).getEntities()) {
+                if (e instanceof Enemy && e.customName() == null) e.remove();
+            }
+        }
     }
 
     // ------------------------------------------------------------------ admin
@@ -483,6 +535,9 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
                     for (Invite i : plugin.invites().valid(p.getUniqueId())) out.add(i.ownerName());
                     return filter(out, args[1]);
                 }
+            }
+            case "mobs" -> {
+                if (args.length == 2) return filter(List.of("on", "off"), args[1]);
             }
             case "reset" -> {
                 if (args.length == 2) return filter(List.of("confirm"), args[1]);

@@ -9,10 +9,15 @@ import dev.chunklock.model.IslandPermission;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.Sound;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Random;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
@@ -36,8 +41,45 @@ public final class UnlockService {
         return Math.max(0, req.amount() - island.progress(rel, req.material()));
     }
 
-    public boolean isComplete(Island island, ChunkPos rel, Settings.Tier tier) {
-        for (Settings.Requirement r : tier.items()) {
+    /**
+     * Požadavky konkrétního zamčeného chunku. Položky tieru fungují jako zásobník, ze kterého se
+     * pro každý chunk deterministicky (podle ostrova + pozice chunku) vybere jiná kombinace a množství.
+     */
+    public List<Settings.Requirement> requirements(Island island, ChunkPos rel) {
+        Settings.Tier tier = tierFor(island);
+        List<Settings.Requirement> pool = tier.items();
+        ConfigurationSection v = plugin.getConfig().getConfigurationSection("unlock.variation");
+        if (v == null || !v.getBoolean("enabled", true) || pool.isEmpty()) return pool;
+
+        long seed = island.owner().getMostSignificantBits() * 31L
+                + island.owner().getLeastSignificantBits() * 17L
+                + rel.key() * 1_000_003L
+                + tier.from() * 7919L;
+        Random rnd = new Random(seed);
+
+        int min = Math.max(1, Math.min(v.getInt("min-items", pool.size()), pool.size()));
+        int max = Math.max(min, Math.min(v.getInt("max-items", pool.size()), pool.size()));
+        int count = min + rnd.nextInt(max - min + 1);
+
+        List<Integer> idx = new ArrayList<>();
+        for (int i = 0; i < pool.size(); i++) idx.add(i);
+        Collections.shuffle(idx, rnd);
+        List<Integer> chosen = new ArrayList<>(idx.subList(0, count));
+        Collections.sort(chosen);
+
+        int variance = Math.max(0, Math.min(90, v.getInt("amount-variance", 0)));
+        List<Settings.Requirement> out = new ArrayList<>();
+        for (int i : chosen) {
+            Settings.Requirement base = pool.get(i);
+            double factor = 1.0 + (rnd.nextDouble() * 2.0 - 1.0) * variance / 100.0;
+            int amount = Math.max(1, (int) Math.round(base.amount() * factor));
+            out.add(new Settings.Requirement(base.material(), amount));
+        }
+        return out;
+    }
+
+    public boolean isComplete(Island island, ChunkPos rel) {
+        for (Settings.Requirement r : requirements(island, rel)) {
             if (remaining(island, rel, r) > 0) return false;
         }
         return true;
@@ -45,11 +87,12 @@ public final class UnlockService {
 
     public double price(Island island, ChunkPos rel) {
         Settings.Tier tier = tierFor(island);
+        List<Settings.Requirement> reqs = requirements(island, rel);
         double price = tier.money();
-        if (plugin.settings().reduceByProgress && !tier.items().isEmpty()) {
+        if (plugin.settings().reduceByProgress && !reqs.isEmpty()) {
             int total = 0;
             int left = 0;
-            for (Settings.Requirement r : tier.items()) {
+            for (Settings.Requirement r : reqs) {
                 total += r.amount();
                 left += remaining(island, rel, r);
             }
@@ -62,6 +105,12 @@ public final class UnlockService {
         return plugin.settings().moneyEnabled
                 && tierFor(island).money() > 0
                 && plugin.economy() != null;
+    }
+
+    /** Smí hráč platit penězi? (permise z configu, prázdná = každý) */
+    public boolean canPay(Player player) {
+        String perm = plugin.getConfig().getString("unlock.money.permission", "").trim();
+        return perm.isEmpty() || player.hasPermission(perm);
     }
 
     public String formatPrice(double price) {
@@ -92,11 +141,10 @@ public final class UnlockService {
     public void deliver(Player player, Island island, ChunkPos rel) {
         if (!check(player, island, rel)) return;
         Messages msg = plugin.messages();
-        Settings.Tier tier = tierFor(island);
 
         StringBuilder summary = new StringBuilder();
         int totalTaken = 0;
-        for (Settings.Requirement req : tier.items()) {
+        for (Settings.Requirement req : requirements(island, rel)) {
             int need = remaining(island, rel, req);
             if (need <= 0) continue;
             int taken = takeItems(player, req.material(), need);
@@ -107,7 +155,7 @@ public final class UnlockService {
             summary.append(taken).append("x ").append(pretty(req.material()));
         }
 
-        boolean complete = isComplete(island, rel, tier);
+        boolean complete = isComplete(island, rel);
         if (totalTaken == 0 && !complete) {
             msg.send(player, "unlock.no-items");
             return;
@@ -126,6 +174,10 @@ public final class UnlockService {
     public void pay(Player player, Island island, ChunkPos rel) {
         if (!check(player, island, rel)) return;
         Messages msg = plugin.messages();
+        if (!canPay(player)) {
+            msg.send(player, "unlock.no-buy-permission");
+            return;
+        }
         if (!moneyAvailable(island)) {
             msg.send(player, "unlock.money-disabled");
             return;
