@@ -45,6 +45,8 @@ public final class Island {
     private final Map<Long, Map<Material, Integer>> progress = new HashMap<>();
     private final Map<UUID, Member> members = new LinkedHashMap<>();
     private boolean mobSpawning = true;
+    /** Čas vytvoření ostrova (epoch ms) - pro žebříček nejstarších chunků. */
+    private long created = System.currentTimeMillis();
 
     public Island(UUID owner, String ownerName, int gridX, int gridZ) {
         this.owner = owner;
@@ -71,6 +73,14 @@ public final class Island {
 
     public int gridZ() {
         return gridZ;
+    }
+
+    public long created() {
+        return created;
+    }
+
+    public void setCreated(long created) {
+        this.created = created;
     }
 
     public boolean mobSpawning() {
@@ -102,6 +112,7 @@ public final class Island {
     public void reset() {
         unlocked.clear();
         progress.clear();
+        created = System.currentTimeMillis();
         unlocked.add(new ChunkPos(0, 0).key());
     }
 

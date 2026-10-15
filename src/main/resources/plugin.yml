@@ -4,7 +4,7 @@ main: dev.chunklock.ChunkLockPlugin
 api-version: "1.21"
 author: Failxos
 description: Vlastní chunk ostrovy - odemykej okolní chunky itemy nebo penězi.
-softdepend: [Vault]
+softdepend: [Vault, PlaceholderAPI]
 
 commands:
   chunk:

@@ -36,3 +36,16 @@ Oprávnění členů: `build, break, interact, containers, animals, unlock, invi
 ## Konfigurace
 Vše v `config.yml` (stromy a šance, itemy a ceny po tierech, světy, omezení příkazů
 podle světa) a `messages.yml` (MiniMessage).
+
+## PlaceholderAPI (žebříčky pro hologramy)
+Vyžaduje PlaceholderAPI (softdepend). Expanze `chunklock` se zaregistruje sama.
+
+| Placeholder | Význam |
+|---|---|
+| `%chunklock_top_N_name%` / `%chunklock_top_N_value%` | N-tý hráč s nejvíce odemčenými chunky (N = 1-10) / počet chunků |
+| `%chunklock_oldest_N_name%` | N-tý hráč s nejstarším chunkem (1 = nejstarší) |
+| `%chunklock_oldest_N_value%` / `_date%` / `_days%` | stáří (`12d 4h`) / datum (`03.09.2026`) / dny |
+| `%chunklock_unlocked%` / `%chunklock_age%` | počet chunků / stáří chunku hráče |
+
+Žebříčky se přepočítávají každých 10 s. Datum vytvoření se ukládá do `data/islands/<uuid>.yml` (`created`);
+u starších ostrovů bez něj se použije první připojení hráče na server.

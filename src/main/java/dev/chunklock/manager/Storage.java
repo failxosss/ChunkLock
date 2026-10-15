@@ -68,6 +68,7 @@ public final class Storage {
         }
         if (island.unlockedCount() == 0) island.unlock(new ChunkPos(0, 0));
         island.setMobSpawning(y.getBoolean("mob-spawning", true));
+        island.setCreated(y.contains("created") ? y.getLong("created") : guessCreated(owner, file));
 
         ConfigurationSection prog = y.getConfigurationSection("progress");
         if (prog != null) {
@@ -101,6 +102,18 @@ public final class Storage {
         return island;
     }
 
+    /** Starší ostrovy nemají uložené datum vytvoření - zkusíme první připojení hráče, pak čas souboru. */
+    private long guessCreated(UUID owner, File file) {
+        long first = Bukkit.getOfflinePlayer(owner).getFirstPlayed();
+        if (first > 0) return first;
+        try {
+            return java.nio.file.Files.readAttributes(file.toPath(), java.nio.file.attribute.BasicFileAttributes.class)
+                    .creationTime().toMillis();
+        } catch (IOException | RuntimeException ex) {
+            return System.currentTimeMillis();
+        }
+    }
+
     public State loadState(int defaultSpacing) {
         YamlConfiguration y = YamlConfiguration.loadConfiguration(stateFile);
         Map<UUID, UUID> active = new HashMap<>();
@@ -125,6 +138,7 @@ public final class Storage {
         y.set("grid-x", is.gridX());
         y.set("grid-z", is.gridZ());
         y.set("mob-spawning", is.mobSpawning());
+        y.set("created", is.created());
 
         List<String> unlocked = new ArrayList<>();
         for (long key : is.unlockedKeys()) unlocked.add(ChunkPos.fromKey(key).serialize());

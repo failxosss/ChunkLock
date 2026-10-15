@@ -69,6 +69,11 @@ public final class ChunkLockPlugin extends JavaPlugin {
         // pravidelné ukládání
         getServer().getScheduler().runTaskTimer(this, islands::saveAll, 6000L, 6000L);
 
+        if (getServer().getPluginManager().isPluginEnabled("PlaceholderAPI")) {
+            new dev.chunklock.hook.ChunkLockExpansion(this).register();
+            getLogger().info("PlaceholderAPI expanze 'chunklock' zaregistrována.");
+        }
+
         getLogger().info("ChunkLock zapnut, svět: " + settings.worldName);
     }
 
