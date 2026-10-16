@@ -2,14 +2,17 @@ package dev.chunklock.command;
 
 import dev.chunklock.ChunkLockPlugin;
 import dev.chunklock.config.Messages;
+import dev.chunklock.config.Settings;
 import dev.chunklock.gui.PermissionGui;
 import dev.chunklock.manager.InviteManager.Invite;
 import dev.chunklock.manager.IslandManager;
+import dev.chunklock.manager.UnlockService;
 import dev.chunklock.model.ChunkPos;
 import dev.chunklock.model.Island;
 import dev.chunklock.model.IslandPermission;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
+import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
@@ -33,8 +36,9 @@ import static dev.chunklock.config.Messages.ph;
 public final class ChunkCommand implements CommandExecutor, TabCompleter {
 
     private static final List<String> SUBS = List.of("home", "info", "invite", "accept", "deny", "kick",
-            "leave", "members", "permission", "mobs", "reset", "help");
-    private static final List<String> ADMIN_SUBS = List.of("reload", "tp", "unlock", "delete");
+            "leave", "members", "permission", "mobs", "reset", "list", "switch", "invites", "map", "top", "help");
+    private static final List<String> ADMIN_SUBS = List.of("reload", "tp", "unlock", "lock", "delete", "reset",
+            "list", "info", "addmember", "removemember", "mobs", "refresh", "needs");
 
     private final ChunkLockPlugin plugin;
 
@@ -59,7 +63,7 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
             return true;
         }
         if (sub.equals("help")) {
-            msg().sendList(sender, "help");
+            sendHelp(sender);
             return true;
         }
         if (!(sender instanceof Player p)) {
@@ -80,7 +84,12 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
             case "permission", "permissions", "perm" -> permission(p, args);
             case "mobs" -> mobs(p, args);
             case "reset" -> reset(p, args);
-            default -> msg().sendList(p, "help");
+            case "list" -> list(p);
+            case "switch" -> switchIsland(p, args);
+            case "invites" -> invites(p);
+            case "map" -> map(p);
+            case "top" -> top(p);
+            default -> sendHelp(p);
         }
         return true;
     }
@@ -420,6 +429,117 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
         }
     }
 
+    private void sendHelp(CommandSender to) {
+        msg().sendList(to, "help");
+        msg().sendList(to, "help-more");
+        if (to.hasPermission("chunklock.admin")) msg().sendList(to, "help-admin");
+    }
+
+    // ------------------------------------------------------------------ nové příkazy hráčů
+
+    /** /chunk list - chunky, kde jsem majitel nebo člen. */
+    private void list(Player p) {
+        List<Island> mine = new ArrayList<>();
+        for (Island i : islands().all()) {
+            if (i.isMember(p.getUniqueId())) mine.add(i);
+        }
+        if (mine.isEmpty()) {
+            msg().send(p, "no-active-island");
+            return;
+        }
+        Island active = islands().activeIsland(p.getUniqueId());
+        msg().send(p, "list.header");
+        for (Island i : mine) {
+            msg().send(p, i == active ? "list.entry-active" : "list.entry",
+                    ph("owner", i.ownerName()), ph("unlocked", i.unlockedCount()),
+                    ph("members", i.members().size() + 1));
+        }
+    }
+
+    /** /chunk switch <majitel> - přepne chunk, na který tě teleportuje /chunk. */
+    private void switchIsland(Player p, String[] args) {
+        if (args.length < 2) {
+            msg().send(p, "usage.switch");
+            return;
+        }
+        Island island = islands().byOwnerName(args[1]);
+        if (island == null || !island.isMember(p.getUniqueId())) {
+            msg().send(p, "switch.not-member");
+            return;
+        }
+        islands().setActive(p.getUniqueId(), island.owner());
+        msg().send(p, "switch.success", ph("owner", island.ownerName()));
+    }
+
+    /** /chunk invites - čekající pozvánky. */
+    private void invites(Player p) {
+        List<Invite> list = plugin.invites().valid(p.getUniqueId());
+        if (list.isEmpty()) {
+            msg().send(p, "invite.none");
+            return;
+        }
+        msg().send(p, "invites.header");
+        for (Invite i : list) {
+            long seconds = Math.max(0, (i.expiresAt() - System.currentTimeMillis()) / 1000);
+            Component accept = msg().get("invite.accept-button")
+                    .clickEvent(ClickEvent.runCommand("/chunk accept " + i.ownerName()));
+            Component deny = msg().get("invite.deny-button")
+                    .clickEvent(ClickEvent.runCommand("/chunk deny " + i.ownerName()));
+            msg().send(p, "invites.entry", ph("owner", i.ownerName()), ph("inviter", i.inviterName()),
+                    ph("seconds", seconds), Placeholder.component("accept", accept),
+                    Placeholder.component("deny", deny));
+        }
+    }
+
+    /** /chunk map - textová mapa odemčených chunků (sever nahoře). */
+    private void map(Player p) {
+        Island island = islands().activeIsland(p.getUniqueId());
+        if (island == null) {
+            msg().send(p, "no-active-island");
+            return;
+        }
+        int r = Math.min(5, islands().radius());
+        ChunkPos here = null;
+        IslandManager.Plot plot = islands().plotAt(p.getLocation());
+        if (plot != null && plot.island() == island) here = plot.rel();
+
+        msg().send(p, "map.header", ph("owner", island.ownerName()),
+                ph("unlocked", island.unlockedCount()), ph("max", islands().maxChunks()));
+        for (int z = -r; z <= r; z++) {
+            Component row = Component.empty();
+            for (int x = -r; x <= r; x++) {
+                ChunkPos c = new ChunkPos(x, z);
+                Component cell;
+                if (c.equals(here)) cell = Component.text("◉ ", NamedTextColor.YELLOW);
+                else if (x == 0 && z == 0) cell = Component.text("◆ ", NamedTextColor.GOLD);
+                else if (island.isUnlocked(c)) cell = Component.text("■ ", NamedTextColor.GREEN);
+                else if (islands().canUnlock(island, c)) cell = Component.text("■ ", NamedTextColor.RED);
+                else cell = Component.text("■ ", NamedTextColor.DARK_GRAY);
+                row = row.append(cell);
+            }
+            p.sendMessage(row);
+        }
+        msg().sendList(p, "map.legend");
+    }
+
+    /** /chunk top - žebříček podle počtu odemčených chunků. */
+    private void top(Player p) {
+        List<Island> sorted = new ArrayList<>(islands().all());
+        sorted.sort((a, b) -> Integer.compare(b.unlockedCount(), a.unlockedCount()));
+        msg().send(p, "top.header");
+        int shown = Math.min(10, sorted.size());
+        for (int i = 0; i < shown; i++) {
+            Island is = sorted.get(i);
+            msg().send(p, "top.entry", ph("pos", i + 1), ph("player", is.ownerName()),
+                    ph("unlocked", is.unlockedCount()));
+        }
+        Island own = islands().byOwner(p.getUniqueId());
+        int rank = own == null ? -1 : sorted.indexOf(own);
+        if (rank >= shown) {
+            msg().send(p, "top.own", ph("pos", rank + 1), ph("unlocked", own.unlockedCount()));
+        }
+    }
+
     // ------------------------------------------------------------------ admin
 
     private void admin(CommandSender sender, String[] args) {
@@ -428,7 +548,7 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
             return;
         }
         if (args.length < 2) {
-            msg().send(sender, "usage.admin");
+            adminUsage(sender);
             return;
         }
         switch (args[1].toLowerCase(Locale.ROOT)) {
@@ -448,14 +568,14 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
                 Island island = adminIsland(sender, args);
                 if (island == null) return;
                 if (args.length < 4) {
-                    msg().send(sender, "usage.admin");
+                    adminUsage(sender);
                     return;
                 }
                 ChunkPos rel;
                 try {
                     rel = new ChunkPos(Integer.parseInt(args[3]), Integer.parseInt(args.length > 4 ? args[4] : "0"));
                 } catch (NumberFormatException ex) {
-                    msg().send(sender, "usage.admin");
+                    adminUsage(sender);
                     return;
                 }
                 if (!islands().canUnlock(island, rel)) {
@@ -472,13 +592,157 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
                 islands().deleteIsland(island);
                 msg().send(sender, "admin.deleted", ph("player", name));
             }
-            default -> msg().send(sender, "usage.admin");
+            case "lock" -> {
+                Island island = adminIsland(sender, args);
+                if (island == null) return;
+                if (args.length < 5) {
+                    adminUsage(sender);
+                    return;
+                }
+                ChunkPos rel;
+                try {
+                    rel = new ChunkPos(Integer.parseInt(args[3]), Integer.parseInt(args[4]));
+                } catch (NumberFormatException ex) {
+                    adminUsage(sender);
+                    return;
+                }
+                if (!islands().lockChunk(island, rel)) {
+                    msg().send(sender, "admin.lock-invalid");
+                    return;
+                }
+                msg().send(sender, "admin.locked", ph("x", rel.x()), ph("z", rel.z()));
+            }
+            case "reset" -> {
+                Island island = adminIsland(sender, args);
+                if (island == null) return;
+                islands().resetIsland(island, Bukkit.getPlayer(island.owner()));
+                msg().send(sender, "admin.reset-started", ph("player", island.ownerName()));
+            }
+            case "list" -> {
+                List<Island> sorted = new ArrayList<>(islands().all());
+                sorted.sort((a, b) -> Integer.compare(b.unlockedCount(), a.unlockedCount()));
+                msg().send(sender, "admin.list-header", ph("count", sorted.size()));
+                int shown = Math.min(30, sorted.size());
+                for (int i = 0; i < shown; i++) {
+                    Island is = sorted.get(i);
+                    boolean online = Bukkit.getPlayer(is.owner()) != null;
+                    msg().send(sender, online ? "admin.list-entry-online" : "admin.list-entry",
+                            ph("owner", is.ownerName()), ph("unlocked", is.unlockedCount()),
+                            ph("members", is.members().size() + 1));
+                }
+                if (sorted.size() > shown) {
+                    msg().send(sender, "admin.list-more", ph("more", sorted.size() - shown));
+                }
+            }
+            case "info" -> {
+                Island island = adminIsland(sender, args);
+                if (island == null) return;
+                List<String> names = new ArrayList<>();
+                for (Island.Member m : island.members().values()) names.add(m.name());
+                msg().sendList(sender, "admin.info",
+                        ph("owner", island.ownerName()),
+                        ph("unlocked", island.unlockedCount()),
+                        ph("max", islands().maxChunks()),
+                        ph("members", names.isEmpty() ? "-" : String.join(", ", names)),
+                        ph("mobs", island.mobSpawning() ? "ano" : "ne"),
+                        ph("grid", island.gridX() + ", " + island.gridZ()));
+            }
+            case "addmember" -> {
+                Island island = adminIsland(sender, args);
+                if (island == null) return;
+                if (args.length < 4) {
+                    adminUsage(sender);
+                    return;
+                }
+                Player target = Bukkit.getPlayerExact(args[3]);
+                if (target == null) {
+                    msg().send(sender, "player-not-found");
+                    return;
+                }
+                if (island.isMember(target.getUniqueId())) {
+                    msg().send(sender, "already-member");
+                    return;
+                }
+                if (island.members().size() >= plugin.settings().maxMembers) {
+                    msg().send(sender, "island-full");
+                    return;
+                }
+                island.addMember(target.getUniqueId(), target.getName(), plugin.settings().defaultPermissions);
+                plugin.storage().saveIsland(island);
+                msg().send(sender, "admin.member-added", ph("player", target.getName()),
+                        ph("owner", island.ownerName()));
+            }
+            case "removemember" -> {
+                Island island = adminIsland(sender, args);
+                if (island == null) return;
+                if (args.length < 4) {
+                    adminUsage(sender);
+                    return;
+                }
+                UUID target = island.findMember(args[3]);
+                if (target == null) {
+                    msg().send(sender, "admin.not-member");
+                    return;
+                }
+                String name = island.members().get(target).name();
+                island.removeMember(target);
+                plugin.storage().saveIsland(island);
+                islands().onMemberRemoved(island, target);
+                msg().send(sender, "admin.member-removed", ph("player", name), ph("owner", island.ownerName()));
+            }
+            case "mobs" -> {
+                Island island = adminIsland(sender, args);
+                if (island == null) return;
+                boolean value;
+                if (args.length >= 4) {
+                    String a = args[3].toLowerCase(Locale.ROOT);
+                    if (a.equals("on") || a.equals("true")) value = true;
+                    else if (a.equals("off") || a.equals("false")) value = false;
+                    else {
+                        adminUsage(sender);
+                        return;
+                    }
+                } else {
+                    value = !island.mobSpawning();
+                }
+                island.setMobSpawning(value);
+                plugin.storage().saveIsland(island);
+                if (!value) removeHostileMobs(island);
+                msg().send(sender, "admin.mobs-set", ph("owner", island.ownerName()),
+                        ph("value", value ? "zapnuto" : "vypnuto"));
+            }
+            case "needs" -> {
+                Island island = adminIsland(sender, args);
+                if (island == null) return;
+                msg().send(sender, "admin.needs-header", ph("owner", island.ownerName()));
+                for (ChunkPos locked : islands().lockedFrontier(island)) {
+                    msg().send(sender, "admin.needs-chunk", ph("x", locked.x()), ph("z", locked.z()));
+                    for (Settings.Requirement r : plugin.unlocks().requirements(island, locked)) {
+                        msg().send(sender, "admin.needs-line",
+                                ph("item", UnlockService.pretty(r.material())),
+                                ph("need", r.amount()),
+                                ph("have", plugin.unlocks().available(island, locked, r.material())));
+                    }
+                }
+            }
+            case "refresh" -> {
+                Island island = adminIsland(sender, args);
+                if (island == null) return;
+                island.clearAllRequired(); // požadavky se spočítají znovu
+                plugin.panels().spawn(island);
+                msg().send(sender, "admin.refreshed", ph("owner", island.ownerName()));
+            }
+            default -> adminUsage(sender);
         }
+    }
+
+    private void adminUsage(CommandSender sender) {
+        msg().sendList(sender, "help-admin");
     }
 
     private Island adminIsland(CommandSender sender, String[] args) {
         if (args.length < 3) {
-            msg().send(sender, "usage.admin");
+            adminUsage(sender);
             return null;
         }
         Island island = islands().byOwnerName(args[2]);
@@ -500,9 +764,30 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
 
         if (sub.equals("admin") && sender.hasPermission("chunklock.admin")) {
             if (args.length == 2) return filter(new ArrayList<>(ADMIN_SUBS), args[1]);
-            if (args.length == 3) {
+            String asub = args[1].toLowerCase(Locale.ROOT);
+            if (args.length == 3 && !asub.equals("list") && !asub.equals("reload")) {
                 for (Island i : islands().all()) out.add(i.ownerName());
                 return filter(out, args[2]);
+            }
+            if (args.length == 4) {
+                switch (asub) {
+                    case "addmember" -> {
+                        for (Player online : Bukkit.getOnlinePlayers()) out.add(online.getName());
+                        return filter(out, args[3]);
+                    }
+                    case "removemember" -> {
+                        Island is = islands().byOwnerName(args[2]);
+                        if (is != null) {
+                            for (Island.Member m : is.members().values()) out.add(m.name());
+                        }
+                        return filter(out, args[3]);
+                    }
+                    case "mobs" -> {
+                        return filter(List.of("on", "off"), args[3]);
+                    }
+                    default -> {
+                    }
+                }
             }
             return out;
         }
@@ -538,6 +823,14 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
             }
             case "mobs" -> {
                 if (args.length == 2) return filter(List.of("on", "off"), args[1]);
+            }
+            case "switch" -> {
+                if (args.length == 2) {
+                    for (Island i : islands().all()) {
+                        if (i.isMember(p.getUniqueId())) out.add(i.ownerName());
+                    }
+                    return filter(out, args[1]);
+                }
             }
             case "reset" -> {
                 if (args.length == 2) return filter(List.of("confirm"), args[1]);

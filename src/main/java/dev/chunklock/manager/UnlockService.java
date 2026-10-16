@@ -15,10 +15,14 @@ import org.bukkit.inventory.ItemStack;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Random;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 
@@ -42,10 +46,10 @@ public final class UnlockService {
     }
 
     /**
-     * Požadavky konkrétního zamčeného chunku. Položky tieru fungují jako zásobník, ze kterého se
+     * Pevné požadavky (unlock.mode: TIERS). Položky tieru fungují jako zásobník, ze kterého se
      * pro každý chunk deterministicky (podle ostrova + pozice chunku) vybere jiná kombinace a množství.
      */
-    public List<Settings.Requirement> requirements(Island island, ChunkPos rel) {
+    private List<Settings.Requirement> tierRequirements(Island island, ChunkPos rel) {
         Settings.Tier tier = tierFor(island);
         List<Settings.Requirement> pool = tier.items();
         ConfigurationSection v = plugin.getConfig().getConfigurationSection("unlock.variation");
@@ -77,6 +81,167 @@ public final class UnlockService {
             out.add(new Settings.Requirement(base.material(), amount));
         }
         return out;
+    }
+
+    /**
+     * Požadavky konkrétního zamčeného chunku.
+     * Režim CHUNK: počítají se ze surovin, které jde získat v sousedním odemčeném chunku (viz computeFromChunks),
+     * a po prvním spočítání se drží u ostrova, aby se čísla na cedulce nepřepisovala.
+     * Režim TIERS: pevné požadavky z config.yml.
+     */
+    public List<Settings.Requirement> requirements(Island island, ChunkPos rel) {
+        if (!plugin.settings().chunkMode) return tierRequirements(island, rel);
+
+        Map<Material, Integer> cached = island.required(rel);
+        if (cached == null) {
+            List<Settings.Requirement> fresh = computeFromChunks(island, rel);
+            if (fresh == null || fresh.isEmpty()) return tierRequirements(island, rel); // nemáme z čeho počítat
+            cached = new LinkedHashMap<>();
+            for (Settings.Requirement r : fresh) cached.put(r.material(), r.amount());
+            island.setRequired(rel, cached);
+        }
+        List<Settings.Requirement> out = new ArrayList<>(cached.size());
+        for (Map.Entry<Material, Integer> e : cached.entrySet()) {
+            out.add(new Settings.Requirement(e.getKey(), e.getValue()));
+        }
+        return out;
+    }
+
+    private record Candidate(Settings.ResourceRule rule, int pool) {}
+
+    /**
+     * Kolik které suroviny jde získat v sousedních odemčených chunkách zamčeného chunku. U každé suroviny se bere
+     * ten nejbohatší soused (ne součet) - požadavek tak vždy vyjde z jednoho konkrétního chunku.
+     * Vrací null, když chunk nemá žádného odemčeného souseda.
+     */
+    public Map<Settings.ResourceRule, Integer> pools(Island island, ChunkPos rel) {
+        List<Map<Material, Integer>> neighbours = new ArrayList<>();
+        for (int[] d : IslandManager.DIRS) {
+            ChunkPos n = rel.offset(d[0], d[1]);
+            if (island.isUnlocked(n)) neighbours.add(plugin.resources().get(island, n));
+        }
+        if (neighbours.isEmpty()) return null;
+
+        Map<Settings.ResourceRule, Integer> out = new LinkedHashMap<>();
+        for (Settings.ResourceRule rule : plugin.settings().resourceRules) {
+            int best = 0;
+            for (Map<Material, Integer> counts : neighbours) {
+                double sum = 0;
+                for (Material block : rule.blocks()) sum += counts.getOrDefault(block, 0) * rule.perBlock();
+                best = Math.max(best, (int) Math.floor(sum));
+            }
+            out.put(rule, best);
+        }
+        return out;
+    }
+
+    /** Kolik daného itemu jde získat v sousedním chunku (pro admin přehled); 0 když nic / neznámé. */
+    public int available(Island island, ChunkPos rel, Material item) {
+        Map<Settings.ResourceRule, Integer> pools = pools(island, rel);
+        if (pools == null) return 0;
+        int best = 0;
+        for (Map.Entry<Settings.ResourceRule, Integer> e : pools.entrySet()) {
+            if (e.getKey().drop() == item) best = Math.max(best, e.getValue());
+        }
+        return best;
+    }
+
+    /**
+     * Vybere požadavky tak, aby se daly splnit těžbou v sousedním chunku:
+     *  - jen suroviny, kterých tam je aspoň min-pool, a které už jsou "odemčené" (from),
+     *  - množství = podíl ze zásoby (share roste s počtem odemčených chunků), nikdy víc než max-share-per-item,
+     *  - první položka je vždy "jádrová" (ruda / dřevo), další se losují podle váhy.
+     * Výběr je deterministický (ostrov + pozice chunku). Vrací null, když chunk nemá odemčeného souseda.
+     */
+    private List<Settings.Requirement> computeFromChunks(Island island, ChunkPos rel) {
+        Settings s = plugin.settings();
+        Map<Settings.ResourceRule, Integer> pools = pools(island, rel);
+        if (pools == null) return null;
+
+        int unlocked = island.unlockedCount();
+        double share = Math.min(s.shareMax, s.shareStart + s.sharePerChunk * Math.max(0, unlocked - 1)) / 100.0;
+
+        long seed = mix(island.owner().getMostSignificantBits());
+        seed = mix(seed ^ island.owner().getLeastSignificantBits());
+        seed = mix(seed ^ rel.key());
+        Random rnd = new Random(seed);
+        rnd.nextLong(); // rozehřátí
+
+        List<Candidate> eligible = new ArrayList<>();
+        List<Candidate> rest = new ArrayList<>(); // záloha pro chudé chunky (ignoruje from a min-pool)
+        for (Map.Entry<Settings.ResourceRule, Integer> e : pools.entrySet()) {
+            Settings.ResourceRule rule = e.getKey();
+            int pool = e.getValue();
+            if (pool < 1) continue;
+            Candidate c = new Candidate(rule, pool);
+            if (rule.from() <= unlocked && pool >= rule.minPool()) eligible.add(c);
+            else rest.add(c);
+        }
+
+        int count = s.chunkMinItems + rnd.nextInt(s.chunkMaxItems - s.chunkMinItems + 1);
+        List<Candidate> picked = new ArrayList<>();
+
+        // 1) první položka z jádrových surovin (rudy, dřevo), aby chunk nebyl jen "doneste hlínu"
+        List<Candidate> core = new ArrayList<>();
+        for (Candidate c : eligible) if (c.rule().core()) core.add(c);
+        if (!core.isEmpty()) {
+            Candidate first = drawWeighted(core, rnd);
+            picked.add(first);
+            eligible.remove(first);
+        }
+        // 2) zbytek podle váhy
+        while (picked.size() < count && !eligible.isEmpty()) {
+            picked.add(drawWeighted(eligible, rnd));
+        }
+        // 3) chudý chunek: doplníme nejbohatšími zbývajícími surovinami, ať je požadavků aspoň min-items
+        rest.sort((a, b) -> Integer.compare(b.pool(), a.pool()));
+        for (Candidate c : rest) {
+            if (picked.size() >= s.chunkMinItems) break;
+            picked.add(c);
+        }
+
+        List<Settings.ResourceRule> order = s.resourceRules;
+        picked.sort(Comparator.comparingInt(c -> order.indexOf(c.rule())));
+
+        double variance = s.shareVariance / 100.0;
+        Map<Material, Integer> out = new LinkedHashMap<>();
+        for (Candidate c : picked) {
+            double factor = 1.0 + (rnd.nextDouble() * 2.0 - 1.0) * variance;
+            int cap = Math.max(1, (int) Math.floor(c.pool() * s.maxSharePerItem / 100.0));
+            int amount = (int) Math.round(c.pool() * share * factor);
+            amount = Math.max(amount, s.chunkMinAmount);
+            amount = Math.min(amount, Math.min(c.rule().max(), cap));
+            amount = Math.min(amount, c.pool());
+            if (amount < 1) continue;
+            out.merge(c.rule().drop(), amount, Math::max);
+        }
+
+        // už odevzdané itemy hráči nepropadnou (starší ostrovy / změna configu): zůstanou jako splněné
+        for (Map.Entry<Material, Integer> e : island.progressOf(rel).entrySet()) {
+            if (e.getValue() > 0 && !out.containsKey(e.getKey())) out.put(e.getKey(), e.getValue());
+        }
+
+        List<Settings.Requirement> result = new ArrayList<>(out.size());
+        for (Map.Entry<Material, Integer> e : out.entrySet()) {
+            result.add(new Settings.Requirement(e.getKey(), e.getValue()));
+        }
+        return result;
+    }
+
+    /** Vylosuje (a odebere ze seznamu) kandidáta podle váhy. */
+    private static Candidate drawWeighted(List<Candidate> list, Random rnd) {
+        int total = 0;
+        for (Candidate c : list) total += c.rule().weight();
+        int r = rnd.nextInt(Math.max(1, total));
+        for (Iterator<Candidate> it = list.iterator(); it.hasNext(); ) {
+            Candidate c = it.next();
+            r -= c.rule().weight();
+            if (r < 0) {
+                it.remove();
+                return c;
+            }
+        }
+        return list.remove(list.size() - 1);
     }
 
     /** SplitMix64 - rozptýlí podobná semínka, aby sousední chunky nedostaly skoro stejný náhodný výběr. */

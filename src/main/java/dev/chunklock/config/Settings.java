@@ -26,6 +26,15 @@ public final class Settings {
 
     public record Tier(int from, double money, List<Requirement> items) {}
 
+    /**
+     * Surovina, kterou jde v chunku získat. drop = item, který hráč odevzdá; blocks = bloky, ze kterých se dostane
+     * (perBlock = kolik itemů z jednoho bloku počítáme); weight = váha při výběru; from = od kolika odemčených
+     * chunků se smí vyžadovat; minPool = kolik jí musí v chunku být, aby se vůbec vyžadovala; max = strop množství;
+     * core = první požadavek chunku se vybírá vždy mezi "jádrovými" surovinami (rudy, dřevo).
+     */
+    public record ResourceRule(String id, Material drop, Set<Material> blocks, double perBlock, int weight,
+                               int from, int minPool, int max, boolean core) {}
+
     public record TreeSettings(boolean enabled, boolean highestFirst, NavigableMap<Integer, Double> chances,
                                List<TreeType> types, int minDistance) {}
 
@@ -42,6 +51,15 @@ public final class Settings {
     public final boolean createWorld;
     public final boolean voidRescue;
     public final int voidRescueY;
+
+    // generování chunků z normálního světa
+    public final boolean worldGeneration;
+    public final String sourceWorldName;
+    public final Long sourceSeed;
+    public final boolean sourceStructures;
+    public final int layersPerTick;
+    public final int startAttempts;
+    public final int startRange;
 
     // ostrov
     public final int maxRadius;
@@ -60,6 +78,19 @@ public final class Settings {
     public final TreeSettings unlockedTrees;
 
     // odemykání
+    /** true = požadavky se počítají podle surovin v sousedním chunku, false = pevné tiery. */
+    public final boolean chunkMode;
+    public final List<ResourceRule> resourceRules;
+    /** Všechny bloky, které se při skenu chunku počítají. */
+    public final Set<Material> resourceBlocks;
+    public final double shareStart;
+    public final double sharePerChunk;
+    public final double shareMax;
+    public final double maxSharePerItem;
+    public final double shareVariance;
+    public final int chunkMinItems;
+    public final int chunkMaxItems;
+    public final int chunkMinAmount;
     public final boolean strictItems;
     public final boolean moneyEnabled;
     public final boolean reduceByProgress;
@@ -95,6 +126,23 @@ public final class Settings {
         voidRescue = cfg.getBoolean("chunk-world.void-rescue", true);
         voidRescueY = cfg.getInt("chunk-world.void-rescue-below-y", 20);
 
+        worldGeneration = cfg.getString("generation.mode", "WORLD").equalsIgnoreCase("WORLD");
+        sourceWorldName = cfg.getString("generation.world.name", "chunklock_source");
+        String seedRaw = cfg.getString("generation.world.seed", "").trim();
+        Long seed = null;
+        if (!seedRaw.isEmpty()) {
+            try {
+                seed = Long.parseLong(seedRaw);
+            } catch (NumberFormatException ex) {
+                seed = (long) seedRaw.hashCode();
+            }
+        }
+        sourceSeed = seed;
+        sourceStructures = cfg.getBoolean("generation.world.structures", true);
+        layersPerTick = Math.max(1, cfg.getInt("generation.world.layers-per-tick", 32));
+        startAttempts = Math.max(0, cfg.getInt("generation.world.start-attempts", 12));
+        startRange = Math.max(100, cfg.getInt("generation.world.start-range-chunks", 20000));
+
         maxRadius = Math.max(1, cfg.getInt("island.max-radius", 8));
         gap = Math.max(2, cfg.getInt("island.gap", 4));
         distanceBlocks = Math.max(0, cfg.getInt("island.distance-blocks", 2000));
@@ -110,6 +158,25 @@ public final class Settings {
         startTrees = readTrees(cfg.getConfigurationSection("island.start-chunk.trees"), log);
         unlockedTrees = readTrees(cfg.getConfigurationSection("island.unlocked-chunks.trees"), log);
 
+        List<ResourceRule> resourceList = readResources(cfg, log);
+        resourceRules = List.copyOf(resourceList);
+        Set<Material> blocks = EnumSet.noneOf(Material.class);
+        for (ResourceRule r : resourceList) blocks.addAll(r.blocks());
+        resourceBlocks = Set.copyOf(blocks);
+        boolean wantChunk = !"TIERS".equalsIgnoreCase(cfg.getString("unlock.mode", "CHUNK"));
+        if (wantChunk && resourceList.isEmpty()) {
+            log.warning("unlock.chunk.resources je prázdné - používám pevné tiery.");
+            wantChunk = false;
+        }
+        chunkMode = wantChunk;
+        shareStart = clamp(cfg.getDouble("unlock.chunk.share-start", 20), 1, 100);
+        shareMax = clamp(cfg.getDouble("unlock.chunk.share-max", 45), shareStart, 100);
+        sharePerChunk = Math.max(0, cfg.getDouble("unlock.chunk.share-per-chunk", 1.5));
+        maxSharePerItem = clamp(cfg.getDouble("unlock.chunk.max-share-per-item", 60), 1, 100);
+        shareVariance = clamp(cfg.getDouble("unlock.chunk.variance", 20), 0, 90);
+        chunkMinItems = Math.max(1, cfg.getInt("unlock.chunk.min-items", 2));
+        chunkMaxItems = Math.max(chunkMinItems, cfg.getInt("unlock.chunk.max-items", 3));
+        chunkMinAmount = Math.max(1, cfg.getInt("unlock.chunk.min-amount", 3));
         strictItems = cfg.getBoolean("unlock.strict-items", true);
         moneyEnabled = cfg.getBoolean("unlock.money.enabled", true);
         reduceByProgress = cfg.getBoolean("unlock.money.reduce-by-progress", true);
@@ -182,6 +249,10 @@ public final class Settings {
     }
 
     // ------------------------------------------------------------------
+
+    private static double clamp(double v, double min, double max) {
+        return Math.max(min, Math.min(max, v));
+    }
 
     private static Set<String> lowerSet(List<String> in) {
         Set<String> out = new HashSet<>();
@@ -269,6 +340,50 @@ public final class Settings {
         }
         if (types.isEmpty()) types.add(TreeType.TREE);
         return new TreeSettings(enabled, highestFirst, chances, types, Math.max(1, sec.getInt("min-distance", 4)));
+    }
+
+    /** Načte unlock.chunk.resources. Neznámé bloky (jiná verze serveru) se tiše přeskočí. */
+    private static List<ResourceRule> readResources(FileConfiguration cfg, Logger log) {
+        List<ResourceRule> out = new ArrayList<>();
+        for (Map<?, ?> map : cfg.getMapList("unlock.chunk.resources")) {
+            String id = String.valueOf(map.get("id"));
+            boolean self = Boolean.parseBoolean(String.valueOf(map.get("self")));
+            Material drop = null;
+            if (!self) {
+                drop = Material.matchMaterial(String.valueOf(map.get("drop")));
+                if (drop == null || drop.isAir() || !drop.isItem()) {
+                    log.warning("Neplatný drop v unlock.chunk.resources (" + id + "): " + map.get("drop"));
+                    continue;
+                }
+            }
+            Set<Material> blocks = EnumSet.noneOf(Material.class);
+            if (map.get("blocks") instanceof List<?> list) {
+                for (Object o : list) {
+                    Material b = Material.matchMaterial(String.valueOf(o));
+                    if (b != null && b.isBlock() && !b.isAir()) blocks.add(b);
+                }
+            }
+            if (blocks.isEmpty()) {
+                log.warning("unlock.chunk.resources (" + id + "): žádný platný blok, přeskakuji.");
+                continue;
+            }
+            double perBlock = Math.max(0.01, toDouble(map.get("per-block"), 1));
+            int weight = Math.max(1, toInt(map.get("weight"), 5));
+            int from = Math.max(0, toInt(map.get("from"), 0));
+            int minPool = Math.max(1, toInt(map.get("min-pool"), 4));
+            int max = Math.max(1, toInt(map.get("max"), 256));
+            boolean core = Boolean.parseBoolean(String.valueOf(map.get("core")));
+            if (self) { // každý blok v seznamu je sám sobě dropem (dřevo, písek...) a je to samostatná surovina
+                for (Material b : blocks) {
+                    if (!b.isItem()) continue;
+                    out.add(new ResourceRule(b.name().toLowerCase(Locale.ROOT), b, EnumSet.of(b), perBlock,
+                            weight, from, minPool, max, core));
+                }
+            } else {
+                out.add(new ResourceRule(id, drop, blocks, perBlock, weight, from, minPool, max, core));
+            }
+        }
+        return out;
     }
 
     private static List<Tier> readTiers(FileConfiguration cfg, Logger log) {

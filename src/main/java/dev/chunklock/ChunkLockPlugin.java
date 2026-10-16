@@ -14,8 +14,10 @@ import dev.chunklock.manager.EconomyHook;
 import dev.chunklock.manager.InviteManager;
 import dev.chunklock.manager.IslandManager;
 import dev.chunklock.manager.PanelManager;
+import dev.chunklock.manager.ResourceScanner;
 import dev.chunklock.manager.Storage;
 import dev.chunklock.manager.UnlockService;
+import dev.chunklock.model.Island;
 import dev.chunklock.util.VoidGenerator;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.generator.ChunkGenerator;
@@ -30,6 +32,7 @@ public final class ChunkLockPlugin extends JavaPlugin {
     private IslandManager islands;
     private PanelManager panels;
     private UnlockService unlocks;
+    private ResourceScanner resources;
     private InviteManager invites;
     private EconomyHook economy;
 
@@ -43,6 +46,7 @@ public final class ChunkLockPlugin extends JavaPlugin {
         islands = new IslandManager(this);
         panels = new PanelManager(this);
         unlocks = new UnlockService(this);
+        resources = new ResourceScanner(this);
 
         if (!islands.init()) {
             getServer().getPluginManager().disablePlugin(this);
@@ -65,6 +69,7 @@ public final class ChunkLockPlugin extends JavaPlugin {
         }
 
         // cedulky u zamčených chunků
+        getServer().getScheduler().runTask(this, panels::sweepAll); // smaže případné zbytky po minulém běhu
         getServer().getScheduler().runTaskTimer(this, panels::tick, 40L, 40L);
         // pravidelné ukládání
         getServer().getScheduler().runTaskTimer(this, islands::saveAll, 6000L, 6000L);
@@ -93,6 +98,11 @@ public final class ChunkLockPlugin extends JavaPlugin {
         reloadConfig();
         settings = new Settings(getConfig(), getLogger());
         messages.reload();
+        if (islands != null) {
+            // požadavky se počítají znovu podle nové konfigurace (odevzdané itemy zůstávají započtené)
+            for (Island island : islands.all()) island.clearAllRequired();
+        }
+        if (panels != null) panels.removeAll(); // cedulky se za chvíli samy vytvoří znovu s novými čísly
     }
 
     /** Vault ekonomika se hledá líně, protože se poskytovatel může registrovat později než tenhle plugin. */
@@ -125,6 +135,10 @@ public final class ChunkLockPlugin extends JavaPlugin {
 
     public UnlockService unlocks() {
         return unlocks;
+    }
+
+    public ResourceScanner resources() {
+        return resources;
     }
 
     public InviteManager invites() {

@@ -39,7 +39,7 @@ public final class MovementListener implements Listener {
         Player player = e.getPlayer();
         if (player.hasPermission(BYPASS)) return;
 
-        if (plugin.settings().voidRescue && to.getY() < plugin.settings().voidRescueY) {
+        if (plugin.settings().voidRescue && to.getY() < im.rescueY(to)) {
             rescue(player);
             return;
         }

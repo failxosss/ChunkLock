@@ -12,8 +12,10 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -68,6 +70,9 @@ public final class Storage {
         }
         if (island.unlockedCount() == 0) island.unlock(new ChunkPos(0, 0));
         island.setMobSpawning(y.getBoolean("mob-spawning", true));
+        if (y.contains("source-x") && y.contains("source-z")) {
+            island.setSource(y.getInt("source-x"), y.getInt("source-z"));
+        }
         island.setCreated(y.contains("created") ? y.getLong("created") : guessCreated(owner, file));
 
         ConfigurationSection prog = y.getConfigurationSection("progress");
@@ -80,6 +85,36 @@ public final class Storage {
                     Material m = Material.matchMaterial(mat);
                     if (m != null) island.setProgress(pos, m, sec.getInt(mat));
                 }
+            }
+        }
+
+        ConfigurationSection res = y.getConfigurationSection("resources");
+        if (res != null) {
+            for (String chunkKey : res.getKeys(false)) {
+                ConfigurationSection sec = res.getConfigurationSection(chunkKey);
+                if (sec == null) continue;
+                Map<Material, Integer> counts = new EnumMap<>(Material.class);
+                for (String mat : sec.getKeys(false)) {
+                    Material m = Material.matchMaterial(mat);
+                    int n = sec.getInt(mat);
+                    if (m != null && n > 0) counts.put(m, n);
+                }
+                island.setResources(ChunkPos.parse(chunkKey), counts); // i prázdný sken = "už zjištěno"
+            }
+        }
+
+        ConfigurationSection req = y.getConfigurationSection("required");
+        if (req != null) {
+            for (String chunkKey : req.getKeys(false)) {
+                ConfigurationSection sec = req.getConfigurationSection(chunkKey);
+                if (sec == null) continue;
+                Map<Material, Integer> items = new LinkedHashMap<>();
+                for (String mat : sec.getKeys(false)) {
+                    Material m = Material.matchMaterial(mat);
+                    int n = sec.getInt(mat);
+                    if (m != null && n > 0) items.put(m, n);
+                }
+                if (!items.isEmpty()) island.setRequired(ChunkPos.parse(chunkKey), items);
             }
         }
 
@@ -138,6 +173,10 @@ public final class Storage {
         y.set("grid-x", is.gridX());
         y.set("grid-z", is.gridZ());
         y.set("mob-spawning", is.mobSpawning());
+        if (is.hasSource()) {
+            y.set("source-x", is.srcX());
+            y.set("source-z", is.srcZ());
+        }
         y.set("created", is.created());
 
         List<String> unlocked = new ArrayList<>();
@@ -148,6 +187,24 @@ public final class Storage {
             String chunk = ChunkPos.fromKey(e.getKey()).serialize();
             for (Map.Entry<Material, Integer> p : e.getValue().entrySet()) {
                 if (p.getValue() > 0) y.set("progress." + chunk + "." + p.getKey().name(), p.getValue());
+            }
+        }
+
+        for (Map.Entry<Long, Map<Material, Integer>> e : is.allResources().entrySet()) {
+            String chunk = ChunkPos.fromKey(e.getKey()).serialize();
+            boolean any = false;
+            for (Map.Entry<Material, Integer> r : e.getValue().entrySet()) {
+                if (r.getValue() <= 0) continue;
+                y.set("resources." + chunk + "." + r.getKey().name(), r.getValue());
+                any = true;
+            }
+            if (!any) y.set("resources." + chunk + "." + Material.AIR.name(), 0); // značka "chunk už byl skenován"
+        }
+
+        for (Map.Entry<Long, Map<Material, Integer>> e : is.allRequired().entrySet()) {
+            String chunk = ChunkPos.fromKey(e.getKey()).serialize();
+            for (Map.Entry<Material, Integer> r : e.getValue().entrySet()) {
+                if (r.getValue() > 0) y.set("required." + chunk + "." + r.getKey().name(), r.getValue());
             }
         }
 

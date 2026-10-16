@@ -43,8 +43,15 @@ public final class Island {
     private final int gridZ;
     private final Set<Long> unlocked = new HashSet<>();
     private final Map<Long, Map<Material, Integer>> progress = new HashMap<>();
+    /** Suroviny (počty bloků) v odemčených chuncích - zjištěné při jejich vygenerování. */
+    private final Map<Long, Map<Material, Integer>> resources = new HashMap<>();
+    /** Spočítané požadavky zamčených chunků (drží se, aby se čísla na cedulce nepřepisovala). */
+    private final Map<Long, Map<Material, Integer>> required = new HashMap<>();
     private final Map<UUID, Member> members = new LinkedHashMap<>();
     private boolean mobSpawning = true;
+    /** Počátek terénu ve zdrojovém světě (chunk souřadnice); null = ostrov je plochý (starý způsob). */
+    private Integer sourceX;
+    private Integer sourceZ;
     /** Čas vytvoření ostrova (epoch ms) - pro žebříček nejstarších chunků. */
     private long created = System.currentTimeMillis();
 
@@ -75,6 +82,28 @@ public final class Island {
         return gridZ;
     }
 
+    public boolean hasSource() {
+        return sourceX != null && sourceZ != null;
+    }
+
+    public int srcX() {
+        return sourceX == null ? 0 : sourceX;
+    }
+
+    public int srcZ() {
+        return sourceZ == null ? 0 : sourceZ;
+    }
+
+    public void setSource(int x, int z) {
+        this.sourceX = x;
+        this.sourceZ = z;
+    }
+
+    public void clearSource() {
+        this.sourceX = null;
+        this.sourceZ = null;
+    }
+
     public long created() {
         return created;
     }
@@ -101,6 +130,10 @@ public final class Island {
         unlocked.add(rel.key());
     }
 
+    public void lock(ChunkPos rel) {
+        unlocked.remove(rel.key());
+    }
+
     public int unlockedCount() {
         return unlocked.size();
     }
@@ -112,6 +145,8 @@ public final class Island {
     public void reset() {
         unlocked.clear();
         progress.clear();
+        resources.clear();
+        required.clear();
         created = System.currentTimeMillis();
         unlocked.add(new ChunkPos(0, 0).key());
     }
@@ -137,6 +172,52 @@ public final class Island {
 
     public Map<Long, Map<Material, Integer>> allProgress() {
         return progress;
+    }
+
+    /** Odevzdané itemy jednoho chunku (nikdy null). */
+    public Map<Material, Integer> progressOf(ChunkPos rel) {
+        Map<Material, Integer> map = progress.get(rel.key());
+        return map == null ? Map.of() : map;
+    }
+
+    // ---- suroviny v chuncích a požadavky ----
+
+    /** Uložený sken chunku (počty bloků), nebo null když ještě nebyl proveden. */
+    public Map<Material, Integer> resources(ChunkPos rel) {
+        return resources.get(rel.key());
+    }
+
+    public void setResources(ChunkPos rel, Map<Material, Integer> counts) {
+        resources.put(rel.key(), counts);
+    }
+
+    public void clearResources(ChunkPos rel) {
+        resources.remove(rel.key());
+    }
+
+    public Map<Long, Map<Material, Integer>> allResources() {
+        return resources;
+    }
+
+    /** Uložené požadavky zamčeného chunku (zachovává pořadí), nebo null když ještě nebyly spočítány. */
+    public Map<Material, Integer> required(ChunkPos rel) {
+        return required.get(rel.key());
+    }
+
+    public void setRequired(ChunkPos rel, Map<Material, Integer> req) {
+        required.put(rel.key(), req);
+    }
+
+    public void clearRequired(ChunkPos rel) {
+        required.remove(rel.key());
+    }
+
+    public void clearAllRequired() {
+        required.clear();
+    }
+
+    public Map<Long, Map<Material, Integer>> allRequired() {
+        return required;
     }
 
     // ---- členové ----

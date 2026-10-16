@@ -14,6 +14,27 @@ chunk-world:
   void-rescue: true
   void-rescue-below-y: 20
 
+# Jak se chunky generují.
+#  WORLD = chunk se zkopíruje z normálního světa (biomy, jeskyně, rudy, struktury, truhly...)
+#  FLAT  = plochý ostrov podle sekce island.terrain níž (stromy a rudy z configu)
+# Změna režimu platí po restartu serveru a jen pro nově vytvořené ostrovy
+# (ostrovy vytvořené starým způsobem zůstanou ploché).
+generation:
+  mode: WORLD
+  world:
+    # Zdrojový svět (normální, vanilla). Vytvoří se sám. Schovej ho před hráči (Multiverse apod.).
+    name: "chunklock_source"
+    # Seed zdrojového světa - prázdné = náhodný. Platí jen při prvním vytvoření světa.
+    seed: ""
+    # Generovat vesnice, pevnosti, doly... ve zdrojovém světě.
+    structures: true
+    # Kolik vrstev (z 384) se zkopíruje za tick. Menší číslo = menší záseky, ale pomalejší odemčení.
+    layers-per-tick: 32
+    # Kolikrát se zkusí najít startovní místo na souši (ne v oceánu/ve stromě).
+    start-attempts: 12
+    # Startovní místa se losují v rozsahu +-tolik chunků od středu zdrojového světa.
+    start-range-chunks: 20000
+
 island:
   # Kolik chunků od středu lze maximálně odemknout (8 = 17x17 chunků).
   max-radius: 8
@@ -133,9 +154,65 @@ delete:
   #  - "[player] spawn"
 
 unlock:
+  # CHUNK = požadavky se počítají z toho, co jde OPRAVDU získat v sousedním odemčeném chunku
+  #         (rudy, dřevo, písek... se spočítají při vygenerování chunku). Pouštní chunk tak nechce dřevo
+  #         a chunk bez zlata nechce zlato - vždycky se dá splnit těžbou v chunku, ze kterého hráč rozšiřuje.
+  # TIERS = pevné požadavky ze sekce tiers níž (jako dřív, ale nemusí jít v chunku získat).
+  mode: CHUNK
   # true = do odemykání se nepočítají itemy se jménem/lorem/enchanty.
   strict-items: true
-  # Každý zamčený chunk má jiné požadavky. Položky tieru níž fungují jako zásobník,
+
+  # Nastavení režimu CHUNK.
+  chunk:
+    # Kolik % zásoby dané suroviny v sousedním chunku se bude vyžadovat. Začíná na share-start,
+    # s každým už odemčeným chunkem roste o share-per-chunk, nejvýš na share-max (postupně těžší odemykání).
+    share-start: 20
+    share-per-chunk: 1.5
+    share-max: 45
+    # Tvrdá pojistka: z jedné suroviny se nikdy nevyžaduje víc než tolik % toho, co v chunku je.
+    max-share-per-item: 60
+    # Množství se náhodně mění o +/- tolik procent (výběr je pro každý chunk stálý).
+    variance: 20
+    # Kolik různých itemů chunk vyžaduje (min..max, ořízne se podle toho, co v chunku je).
+    min-items: 2
+    max-items: 3
+    # Nejmenší požadované množství jedné suroviny (pokud to zásoba v chunku dovolí).
+    min-amount: 3
+    # Suroviny, které se v chunku počítají.
+    #   drop      = item, který hráč odevzdává (rudy jako ingoty = počítá se s vypálením)
+    #   self      = true: každý blok v seznamu je sám sobě dropem (dřevo, písek...) a je to samostatná surovina
+    #   blocks    = bloky, ze kterých se surovina získá
+    #   per-block = kolik itemů dá jeden blok (měď 2, redstone 4, lapis 4 - u rud počítáme minimum z vanilla dropu)
+    #   weight    = váha při náhodném výběru (víc = častěji se vyžaduje)
+    #   from      = od kolika odemčených chunků se smí vyžadovat (vzácné věci až později)
+    #   min-pool  = kolik jí v chunku musí být, aby se vůbec vyžadovala
+    #   max       = strop požadovaného množství
+    #   core      = true: první požadavek chunku se vybírá mezi těmito (rudy, dřevo)
+    resources:
+      - { id: logs,       self: true, blocks: [OAK_LOG, SPRUCE_LOG, BIRCH_LOG, JUNGLE_LOG, ACACIA_LOG, DARK_OAK_LOG, MANGROVE_LOG, CHERRY_LOG, PALE_OAK_LOG], weight: 12, from: 0, min-pool: 6,  max: 192, core: true }
+      - { id: coal,       drop: COAL,         blocks: [COAL_ORE, DEEPSLATE_COAL_ORE],         per-block: 1, weight: 10, from: 0, min-pool: 8,  max: 256, core: true }
+      - { id: copper,     drop: COPPER_INGOT, blocks: [COPPER_ORE, DEEPSLATE_COPPER_ORE],     per-block: 2, weight: 8,  from: 0, min-pool: 8,  max: 256, core: true }
+      - { id: iron,       drop: IRON_INGOT,   blocks: [IRON_ORE, DEEPSLATE_IRON_ORE],         per-block: 1, weight: 8,  from: 1, min-pool: 6,  max: 192, core: true }
+      - { id: gold,       drop: GOLD_INGOT,   blocks: [GOLD_ORE, DEEPSLATE_GOLD_ORE],         per-block: 1, weight: 5,  from: 3, min-pool: 4,  max: 128, core: true }
+      - { id: redstone,   drop: REDSTONE,     blocks: [REDSTONE_ORE, DEEPSLATE_REDSTONE_ORE], per-block: 4, weight: 5,  from: 3, min-pool: 8,  max: 256, core: true }
+      - { id: lapis,      drop: LAPIS_LAZULI, blocks: [LAPIS_ORE, DEEPSLATE_LAPIS_ORE],       per-block: 4, weight: 4,  from: 5, min-pool: 8,  max: 192, core: true }
+      - { id: diamond,    drop: DIAMOND,      blocks: [DIAMOND_ORE, DEEPSLATE_DIAMOND_ORE],   per-block: 1, weight: 3,  from: 6, min-pool: 3,  max: 64,  core: true }
+      - { id: emerald,    drop: EMERALD,      blocks: [EMERALD_ORE, DEEPSLATE_EMERALD_ORE],   per-block: 1, weight: 3,  from: 8, min-pool: 2,  max: 32,  core: true }
+      - { id: sands,      self: true, blocks: [SAND, RED_SAND],                                weight: 5, from: 0, min-pool: 32, max: 256 }
+      - { id: gravel,     self: true, blocks: [GRAVEL],                                        weight: 3, from: 0, min-pool: 32, max: 192 }
+      - { id: mud,        self: true, blocks: [MUD],                                           weight: 3, from: 0, min-pool: 32, max: 192 }
+      - { id: clay,       drop: CLAY_BALL,    blocks: [CLAY],                                 per-block: 4, weight: 3, from: 0, min-pool: 16, max: 192 }
+      - { id: cobble,     drop: COBBLESTONE,  blocks: [STONE],                                weight: 4, from: 0, min-pool: 64, max: 256 }
+      - { id: deepslate,  drop: COBBLED_DEEPSLATE, blocks: [DEEPSLATE],                       weight: 3, from: 4, min-pool: 64, max: 256 }
+      - { id: dirt,       drop: DIRT,         blocks: [DIRT, GRASS_BLOCK, PODZOL, MYCELIUM],  weight: 1, from: 0, min-pool: 64, max: 192 }
+      - { id: stones,     self: true, blocks: [GRANITE, DIORITE, ANDESITE, TUFF, SANDSTONE, RED_SANDSTONE], weight: 2, from: 2, min-pool: 48, max: 256 }
+      - { id: terracotta, self: true, blocks: [TERRACOTTA, WHITE_TERRACOTTA, ORANGE_TERRACOTTA, YELLOW_TERRACOTTA, BROWN_TERRACOTTA, RED_TERRACOTTA, LIGHT_GRAY_TERRACOTTA], weight: 3, from: 0, min-pool: 32, max: 192 }
+      - { id: plants,     self: true, blocks: [SUGAR_CANE, CACTUS, BAMBOO],                    weight: 3, from: 0, min-pool: 8,  max: 96 }
+      - { id: kelp,       drop: KELP,         blocks: [KELP, KELP_PLANT],                     weight: 3, from: 0, min-pool: 16, max: 128 }
+      - { id: pumpkin,    self: true, blocks: [PUMPKIN],                                       weight: 2, from: 2, min-pool: 2,  max: 12 }
+      - { id: melon,      drop: MELON_SLICE,  blocks: [MELON],                                per-block: 3, weight: 2, from: 2, min-pool: 6, max: 48 }
+
+  # Režim TIERS: každý zamčený chunk má jiné požadavky. Položky tieru níž fungují jako zásobník,
   # ze kterého se pro každý chunk (stabilně) vybere jiná kombinace a množství.
   variation:
     enabled: true
@@ -153,7 +230,8 @@ unlock:
     # cenu na cedulce vůbec neuvidí a nemůžou platit. Prázdné = smí každý.
     # Dej ji skupině v LuckPerms: /lp group vip permission set chunklock.buy true
     permission: "chunklock.buy"
-  # Požadavky podle počtu už odemčených chunků ("from").
+  # Požadavky podle počtu už odemčených chunků ("from"). V režimu CHUNK se z tiers používá jen cena v penězích
+  # (money) a požadavky na itemy slouží jako záloha, kdyby se chunk nedal naskenovat.
   tiers:
     - from: 0
       money: 5000

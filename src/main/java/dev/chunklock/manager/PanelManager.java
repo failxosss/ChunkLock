@@ -8,6 +8,7 @@ import dev.chunklock.model.ChunkPos;
 import dev.chunklock.model.Island;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Color;
+import org.bukkit.HeightMap;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
@@ -56,11 +57,17 @@ public final class PanelManager {
 
     private final ChunkLockPlugin plugin;
     private final NamespacedKey panelKey;
+    /** Značka na VŠECH entitách cedulek (hodnota = UUID majitele ostrova) - umožňuje najít a smazat sirotky. */
+    private final NamespacedKey ownerKey;
     private final Map<UUID, List<Panel>> panels = new HashMap<>();
+    private final Set<UUID> tracked = new HashSet<>();
+    /** Ostrovy, kterým se zrovna nesmí vytvářet cedulky (probíhá reset). */
+    private final Map<UUID, Integer> suspended = new HashMap<>();
 
     public PanelManager(ChunkLockPlugin plugin) {
         this.plugin = plugin;
         this.panelKey = new NamespacedKey(plugin, "panel");
+        this.ownerKey = new NamespacedKey(plugin, "panel_owner");
     }
 
     public NamespacedKey key() {
@@ -72,6 +79,7 @@ public final class PanelManager {
     /** Zahodí staré cedulky ostrova a vytvoří nové. */
     public void spawn(Island island) {
         remove(island.owner());
+        if (suspended.containsKey(island.owner())) return;
         IslandManager im = plugin.islands();
         if (im.world() == null) return;
         List<Panel> list = new ArrayList<>();
@@ -98,23 +106,72 @@ public final class PanelManager {
         }
     }
 
+    /** Zastaví tvorbu cedulek ostrova a smaže stávající (použito při resetu). */
+    public void suspend(UUID owner) {
+        suspended.merge(owner, 1, Integer::sum);
+        remove(owner);
+    }
+
+    /** Povolí tvorbu cedulek znovu; vzniknou při dalším ticku nebo teleportu. */
+    public void resume(UUID owner) {
+        suspended.computeIfPresent(owner, (k, v) -> v <= 1 ? null : v - 1);
+    }
+
     public void ensure(Island island) {
+        if (suspended.containsKey(island.owner())) return;
         List<Panel> list = panels.get(island.owner());
         if (list == null || !valid(list)) spawn(island);
     }
 
     public void remove(UUID owner) {
         List<Panel> list = panels.remove(owner);
-        if (list == null) return;
-        for (Panel p : list) {
-            for (Entity e : p.entities) {
-                if (e.isValid()) e.remove();
+        if (list != null) {
+            for (Panel p : list) {
+                for (Entity e : p.entities) {
+                    tracked.remove(e.getUniqueId());
+                    e.remove(); // bez kontroly isValid - jinak by se zapomenuté entity nikdy nesmazaly
+                }
+            }
+        }
+        sweep(owner);
+    }
+
+    /** Smaže všechny entity cedulek daného majitele (null = všech), i ty, které si manager nepamatuje. */
+    private void sweep(UUID owner) {
+        World w = plugin.islands().world();
+        if (w == null) return;
+        String id = owner == null ? null : owner.toString();
+        for (Entity e : w.getEntitiesByClasses(Display.class, Interaction.class)) {
+            String v = e.getPersistentDataContainer().get(ownerKey, PersistentDataType.STRING);
+            if (v == null) continue;
+            if (id == null || id.equals(v)) {
+                tracked.remove(e.getUniqueId());
+                e.remove();
             }
         }
     }
 
+    /** Je to entita cedulky, kterou už nikdo nespravuje? (zbytek po pádu/reloadu/chybě) */
+    public boolean isOrphan(Entity e) {
+        return e.getPersistentDataContainer().has(ownerKey, PersistentDataType.STRING)
+                && !tracked.contains(e.getUniqueId());
+    }
+
+    /** Úklid po startu pluginu. */
+    public void sweepAll() {
+        sweep(null);
+    }
+
+    private <T extends Entity> T add(Panel panel, Island island, T e) {
+        e.getPersistentDataContainer().set(ownerKey, PersistentDataType.STRING, island.owner().toString());
+        tracked.add(e.getUniqueId());
+        panel.entities.add(e);
+        return e;
+    }
+
     public void removeAll() {
         for (UUID owner : new ArrayList<>(panels.keySet())) remove(owner);
+        sweep(null);
     }
 
     /** Volá se periodicky: vytváří cedulky pro ostrovy s hráči a ruší ostatní. */
@@ -138,7 +195,10 @@ public final class PanelManager {
 
     private boolean valid(List<Panel> list) {
         for (Panel p : list) {
-            if (p.hitbox == null || !p.hitbox.isValid()) return false;
+            if (p.hitbox == null || p.hitbox.isDead()) return false;
+            for (Entity e : p.entities) {
+                if (e.isDead()) return false;
+            }
         }
         return true;
     }
@@ -184,7 +244,7 @@ public final class PanelManager {
             tx = 1;
             tz = 0;
         }
-        double base = s.surfaceY + 1 + s.panelHeight;
+        double base = surfaceAt(island, w, dir, minX, minZ, px, pz) + 1 + s.panelHeight;
         // cedulka je natočená k odemčenému sousedovi (tam stojí hráči); 0 = jih, 90 = západ, 180 = sever, -90 = východ
         final float yaw = dir[1] > 0 ? 0f : dir[1] < 0 ? 180f : dir[0] < 0 ? 90f : -90f;
 
@@ -193,7 +253,7 @@ public final class PanelManager {
 
         // titulek
         Messages msg = plugin.messages();
-        panel.entities.add(text(w, new Location(w, px, base + 2.6, pz), msg.get("panel.title"), s.titleScale, yaw));
+        add(panel, island, text(w, new Location(w, px, base + 2.6, pz), msg.get("panel.title"), s.titleScale, yaw));
 
         // itemy + počty
         for (int i = 0; i < n; i++) {
@@ -201,18 +261,18 @@ public final class PanelManager {
             double off = (i - (n - 1) / 2.0) * s.itemSpacing;
             double x = px + tx * off;
             double z = pz + tz * off;
-            panel.entities.add(item(w, new Location(w, x, base + 1.6, z), r.material(), yaw));
+            add(panel, island, item(w, new Location(w, x, base + 1.6, z), r.material(), yaw));
             TextDisplay counter = text(w, new Location(w, x, base + 0.9, z), counter(island, locked, r), 1.0f, yaw);
-            panel.entities.add(counter);
+            add(panel, island, counter);
             panel.counters.put(r.material(), counter);
         }
 
         // spodní text
         panel.footer = text(w, new Location(w, px, base, pz), footer(island, locked), 1.0f, yaw);
-        panel.entities.add(panel.footer);
+        add(panel, island, panel.footer);
         if (plugin.unlocks().moneyAvailable(island)) {
             panel.moneyLine = text(w, new Location(w, px, base - 0.3, pz), moneyText(island, locked), 1.0f, yaw);
-            panel.entities.add(panel.moneyLine);
+            add(panel, island, panel.moneyLine);
         }
 
         // klikací hitbox
@@ -226,8 +286,27 @@ public final class PanelManager {
                     island.owner() + ";" + locked.key());
         });
         panel.hitbox = hitbox;
-        panel.entities.add(hitbox);
+        add(panel, island, hitbox);
         return panel;
+    }
+
+    /** Výška terénu u hrany odemčeného souseda (pro ostrovy z normálního světa), jinak pevné surface-y. */
+    private double surfaceAt(Island island, World w, int[] dir, double minX, double minZ, double px, double pz) {
+        if (!island.hasSource()) return plugin.settings().surfaceY;
+        int best = w.getMinHeight();
+        for (int off = -4; off <= 4; off += 4) {
+            int x;
+            int z;
+            if (dir[0] != 0) {
+                x = (int) Math.floor(dir[0] < 0 ? minX - 1 : minX + 16);
+                z = (int) Math.floor(pz) + off;
+            } else {
+                x = (int) Math.floor(px) + off;
+                z = (int) Math.floor(dir[1] < 0 ? minZ - 1 : minZ + 16);
+            }
+            best = Math.max(best, w.getHighestBlockYAt(x, z, HeightMap.MOTION_BLOCKING_NO_LEAVES));
+        }
+        return best;
     }
 
     private Component counter(Island island, ChunkPos rel, Settings.Requirement r) {

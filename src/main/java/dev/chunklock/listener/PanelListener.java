@@ -11,6 +11,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
+import org.bukkit.event.entity.EntitiesLoadEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.persistence.PersistentDataType;
 
@@ -42,6 +43,14 @@ public final class PanelListener implements Listener {
         if (e.getAttacked() instanceof Interaction hitbox && isPanel(hitbox)) {
             e.setCancelled(true);
             handle(e.getPlayer(), hitbox);
+        }
+    }
+
+    /** Cedulky se neukládají, ale kdyby nějaká zůstala na disku, při načtení chunku ji smažeme. */
+    @EventHandler
+    public void onEntitiesLoad(EntitiesLoadEvent e) {
+        for (Entity en : e.getEntities()) {
+            if (plugin.panels().isOrphan(en)) en.remove();
         }
     }
 

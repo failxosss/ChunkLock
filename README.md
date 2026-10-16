@@ -24,9 +24,17 @@ Na GitHubu se plugin sestaví sám (záložka **Actions** -> poslední běh -> *
 | `/chunk permission <hráč> [oprávnění] [true/false]` | bez oprávnění otevře menu |
 | `/chunk kick <hráč>`, `/chunk leave` | vyhodit člena / odejít |
 | `/chunk reset confirm` | smazat vlastní chunk a začít znovu |
+| `/chunk list` | chunky, kde jsi majitel nebo člen |
+| `/chunk switch <majitel>` | přepnout aktivní chunk pro `/chunk` |
+| `/chunk invites` | čekající pozvánky (klikací) |
+| `/chunk map` | textová mapa odemčených chunků |
+| `/chunk top` | žebříček podle odemčených chunků |
 
 > `/chunk admin delete <hráč>` teleportuje majitele (a hráče na ostrově) na `delete.location` z configu a spustí `delete.commands`. Svět pro chunky se nastavuje v `chunk-world.name` (výchozí `chunkbasebase`).
-| `/chunk admin reload\|tp\|unlock\|delete` | admin (`chunklock.admin`) |
+| `/chunk admin reload\|list\|info\|tp\|unlock\|lock\|reset\|delete` | admin (`chunklock.admin`) |
+| `/chunk admin addmember\|removemember <hráč> <člen>` | správa členů cizího chunku |
+| `/chunk admin mobs <hráč> [on\|off]`, `/chunk admin refresh <hráč>` | spawn mobů / přegenerování cedulek a požadavků |
+| `/chunk admin needs <hráč>` | požadavky zamčených chunků vs. kolik jde v sousedním chunku získat |
 
 Oprávnění členů: `build, break, interact, containers, animals, unlock, invite`.
 
@@ -49,3 +57,32 @@ Vyžaduje PlaceholderAPI (softdepend). Expanze `chunklock` se zaregistruje sama.
 
 Žebříčky se přepočítávají každých 10 s. Datum vytvoření se ukládá do `data/islands/<uuid>.yml` (`created`);
 u starších ostrovů bez něj se použije první připojení hráče na server.
+
+## Generování chunků z normálního světa
+
+V `config.yml` sekce `generation` (výchozí `mode: WORLD`): plugin si vytvoří vanilla svět `chunklock_source`
+(název i seed jdou nastavit) a při vytvoření ostrova a každém odemčení chunku z něj zkopíruje odpovídající chunk
+do void světa: bloky, biomy, jeskyně, rudy, struktury, truhly i spawnery. Sousední chunky ostrova pocházejí ze
+sousedních chunků zdrojového světa, takže terén a biomy na sebe plynule navazují. Start ostrova se hledá na souši
+(ne v oceánu). `mode: FLAT` vrací původní plochý ostrov. Ostrovy vytvořené dřív zůstávají ploché.
+
+## Požadavky na odemčení podle surovin v chunku
+
+V `config.yml` (`unlock.mode: CHUNK`, výchozí) se požadavky nepíšou pevně, ale počítají se z toho, co jde
+v sousedním odemčeném chunku opravdu získat. Při vygenerování každého chunku plugin spočítá bloky (rudy, dřevo,
+písek, jíl, kámen...) a uloží je k ostrovu. Zamčený chunk pak vyžaduje jen část zásoby z chunku, ze kterého se
+rozšiřuje:
+
+- vyžaduje se `share` % zásoby dané suroviny (začíná na `share-start`, s každým odemčeným chunkem roste o
+  `share-per-chunk` až do `share-max`) a nikdy víc než `max-share-per-item` %,
+- vybírají se jen suroviny, kterých v chunku je aspoň `min-pool` a které už jsou "odemčené" (`from`) - diamanty
+  a smaragdy se tedy chtějí až později a jen když v chunku jsou,
+- první požadavek je vždy "jádrový" (ruda nebo dřevo), další se losují podle váhy; počet je `min-items`..`max-items`,
+- rudy se vyžadují jako ingoty (počítá se s vypálením), `per-block` je minimum z vanilla dropu,
+- vypočtené požadavky se k chunku uloží, takže se čísla na cedulce nemění; odevzdané itemy nepropadnou,
+- starší ostrovy se při prvním použití naskenují podle aktuálního stavu chunků.
+
+Seznam surovin (`unlock.chunk.resources`) jde upravit nebo rozšířit. `unlock.mode: TIERS` vrací pevné požadavky
+z `unlock.tiers`. V režimu CHUNK se z `tiers` používá jen cena v penězích. `/chunk admin reload` a
+`/chunk admin refresh <hráč>` požadavky spočítají znovu. `/chunk admin needs <hráč>` ukáže požadavek a vedle něj,
+kolik dané věci v sousedním chunku je.

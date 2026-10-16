@@ -7,6 +7,7 @@ import dev.chunklock.model.ChunkPos;
 import dev.chunklock.model.Island;
 import dev.chunklock.util.VoidGenerator;
 import org.bukkit.Bukkit;
+import org.bukkit.HeightMap;
 import org.bukkit.Chunk;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -49,6 +50,11 @@ public final class IslandManager {
     private int spacing;
     private World world;
 
+    private TerrainCopier terrain;
+    /** Ostrovy, kterým se zrovna kopíruje terén (počet běžících generování). */
+    private final Map<UUID, Integer> generating = new HashMap<>();
+    private final Map<UUID, List<Runnable>> waiting = new HashMap<>();
+
     public IslandManager(ChunkLockPlugin plugin) {
         this.plugin = plugin;
     }
@@ -72,7 +78,39 @@ public final class IslandManager {
         // Rozestup se dá změnit jen dokud neexistuje žádný ostrov, jinak by se rozbily pozice stávajících.
         spacing = islands.isEmpty() ? Math.max(4, configured) : Math.max(4, state.spacing());
         saveState();
-        return resolveWorld();
+        if (!resolveWorld()) return false;
+        if (s.worldGeneration) {
+            TerrainCopier copier = new TerrainCopier(plugin);
+            if (copier.init()) {
+                terrain = copier;
+            } else {
+                plugin.getLogger().warning("Generování z normálního světa se nepodařilo zapnout - používám plochý ostrov.");
+            }
+        }
+        return true;
+    }
+
+    /** Je zapnuté generování chunků z normálního světa? */
+    public boolean worldMode() {
+        return terrain != null;
+    }
+
+    /** Pod jakou výškou se hráč vrací zpět na ostrov (u ostrovů z normálního světa je to pod spodkem světa). */
+    public int rescueY(Location loc) {
+        Plot plot = plotAt(loc);
+        if (plot != null && plot.island().hasSource()) return world.getMinHeight() - 8;
+        return plugin.settings().voidRescueY;
+    }
+
+    private void beginGeneration(Island is) {
+        generating.merge(is.owner(), 1, Integer::sum);
+    }
+
+    private void endGeneration(Island is) {
+        Integer left = generating.computeIfPresent(is.owner(), (k, v) -> v <= 1 ? null : v - 1);
+        if (left != null) return;
+        List<Runnable> w = waiting.remove(is.owner());
+        if (w != null) for (Runnable r : w) r.run();
     }
 
     private boolean resolveWorld() {
@@ -186,7 +224,12 @@ public final class IslandManager {
     public Location spawnLocation(Island is) {
         double x = (centerChunkX(is) << 4) + 8.5;
         double z = (centerChunkZ(is) << 4) + 8.5;
-        return new Location(world, x, plugin.settings().surfaceY + 1, z);
+        double y = plugin.settings().surfaceY + 1;
+        if (is.hasSource()) {
+            y = world.getHighestBlockYAt((int) Math.floor(x), (int) Math.floor(z),
+                    HeightMap.MOTION_BLOCKING_NO_LEAVES) + 1;
+        }
+        return new Location(world, x, y, z);
     }
 
     /** Spirála od středu: 0 -> (0,0), pak prstenec 1, prstenec 2 ... */
@@ -237,9 +280,50 @@ public final class IslandManager {
     public void unlockChunk(Island is, ChunkPos rel) {
         is.unlock(rel);
         is.clearProgress(rel);
-        generateChunk(is, rel, false);
+        is.clearRequired(rel);
+        plugin.panels().suspend(is.owner()); // cedulky vzniknou až po dokončení chunku (výška terénu)
+        beginGeneration(is);
+        Runnable finish = () -> {
+            scanResources(is, rel); // musí být hotové dřív, než vzniknou cedulky sousedních chunků
+            endGeneration(is);
+            plugin.storage().saveIsland(is);
+            plugin.panels().resume(is.owner());
+            plugin.panels().spawn(is);
+        };
+        try {
+            generateChunk(is, rel, false, finish);
+        } catch (RuntimeException ex) {
+            plugin.getLogger().log(java.util.logging.Level.WARNING, "Generování chunku selhalo", ex);
+            finish.run();
+        }
+    }
+
+    /** Zjistí, co jde v čerstvě vygenerovaném chunku získat (podklad pro požadavky sousedních chunků). */
+    private void scanResources(Island is, ChunkPos rel) {
+        try {
+            plugin.resources().record(is, rel);
+        } catch (RuntimeException ex) {
+            plugin.getLogger().log(java.util.logging.Level.WARNING, "Sken surovin chunku selhal", ex);
+        }
+    }
+
+    /** Admin: zamkne odemčený chunk zpět (smaže jeho bloky). Startovní chunk zamknout nejde. */
+    public boolean lockChunk(Island is, ChunkPos rel) {
+        if ((rel.x() == 0 && rel.z() == 0) || !is.isUnlocked(rel)) return false;
+        for (Player p : world.getPlayers()) {
+            Plot plot = plotAt(p.getLocation());
+            if (plot != null && plot.island() == is && plot.rel().equals(rel)) {
+                p.teleportAsync(spawnLocation(is));
+            }
+        }
+        is.lock(rel);
+        is.clearProgress(rel);
+        is.clearResources(rel);
+        is.clearAllRequired(); // sousedé se můžou počítat z jiného chunku
+        clearChunk(world.getChunkAt(centerChunkX(is) + rel.x(), centerChunkZ(is) + rel.z()), is.hasSource());
         plugin.storage().saveIsland(is);
         plugin.panels().spawn(is);
+        return true;
     }
 
     // ---------------------------------------------------------------- vytvoření
@@ -250,13 +334,51 @@ public final class IslandManager {
         islands.put(is.owner(), is);
         bySlot.put(slotKey(is.gridX(), is.gridZ()), is);
         is.unlock(new ChunkPos(0, 0));
-        generateChunk(is, new ChunkPos(0, 0), true);
         plugin.storage().saveIsland(is);
         saveState();
+        beginGeneration(is);
+        Runnable finish = () -> {
+            scanResources(is, new ChunkPos(0, 0));
+            endGeneration(is);
+            plugin.storage().saveIsland(is);
+        };
+        try {
+            generateChunk(is, new ChunkPos(0, 0), true, finish);
+        } catch (RuntimeException ex) {
+            plugin.getLogger().log(java.util.logging.Level.WARNING, "Generování startovního chunku selhalo", ex);
+            finish.run();
+        }
         return is;
     }
 
-    public void generateChunk(Island is, ChunkPos rel, boolean start) {
+    /**
+     * Vygeneruje chunk ostrova. V režimu WORLD zkopíruje terén ze zdrojového světa (asynchronně),
+     * jinak vytvoří plochý ostrov. done se zavolá po dokončení.
+     */
+    public void generateChunk(Island is, ChunkPos rel, boolean start, Runnable done) {
+        boolean useWorld = terrain != null && (start || is.hasSource());
+        if (!useWorld) {
+            if (start) is.clearSource();
+            generateFlat(is, rel, start);
+            if (done != null) done.run();
+            return;
+        }
+        if (start) {
+            terrain.findStart(origin -> {
+                is.setSource(origin[0], origin[1]);
+                copyFromSource(is, rel, done);
+            });
+        } else {
+            copyFromSource(is, rel, done);
+        }
+    }
+
+    private void copyFromSource(Island is, ChunkPos rel, Runnable done) {
+        Chunk target = world.getChunkAt(centerChunkX(is) + rel.x(), centerChunkZ(is) + rel.z());
+        terrain.copy(is.srcX() + rel.x(), is.srcZ() + rel.z(), target, done != null ? done : () -> { });
+    }
+
+    private void generateFlat(Island is, ChunkPos rel, boolean start) {
         Settings s = plugin.settings();
         Chunk chunk = world.getChunkAt(centerChunkX(is) + rel.x(), centerChunkZ(is) + rel.z());
         int baseX = chunk.getX() << 4;
@@ -366,6 +488,11 @@ public final class IslandManager {
     // ---------------------------------------------------------------- teleport
 
     public void teleport(Player player, Island island, Runnable after) {
+        if (generating.containsKey(island.owner())) { // terén se ještě kopíruje - počkáme
+            waiting.computeIfAbsent(island.owner(), k -> new ArrayList<>())
+                    .add(() -> teleport(player, island, after));
+            return;
+        }
         player.teleportAsync(spawnLocation(island)).thenAccept(ok ->
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     if (ok) plugin.panels().ensure(island);
@@ -474,18 +601,33 @@ public final class IslandManager {
         }
     }
 
+    /** initiator může být null (admin reset cizího ostrova, majitel offline). */
     public void resetIsland(Island island, Player initiator) {
+        plugin.panels().suspend(island.owner()); // během resetu se žádné cedulky nesmí objevit
         for (Player p : playersInside(island)) sendToReset(p);
-        plugin.panels().remove(island.owner());
         Bukkit.getScheduler().runTaskLater(plugin, () -> clearIsland(island, () -> {
             island.reset();
-            generateChunk(island, new ChunkPos(0, 0), true);
-            plugin.storage().saveIsland(island);
-            if (initiator.isOnline()) {
-                plugin.messages().send(initiator, "reset.done");
-                if (plugin.getConfig().getBoolean("reset.teleport-back", true)) {
-                    teleport(initiator, island, null);
+            beginGeneration(island);
+            Runnable finish = () -> {
+                scanResources(island, new ChunkPos(0, 0));
+                endGeneration(island);
+                try {
+                    plugin.storage().saveIsland(island);
+                } finally {
+                    plugin.panels().resume(island.owner());
                 }
+                if (initiator != null && initiator.isOnline()) {
+                    plugin.messages().send(initiator, "reset.done");
+                    if (plugin.getConfig().getBoolean("reset.teleport-back", true)) {
+                        teleport(initiator, island, null);
+                    }
+                }
+            };
+            try {
+                generateChunk(island, new ChunkPos(0, 0), true, finish);
+            } catch (RuntimeException ex) {
+                plugin.getLogger().log(java.util.logging.Level.WARNING, "Generování startovního chunku selhalo", ex);
+                finish.run();
             }
         }), 20L);
     }
@@ -521,6 +663,7 @@ public final class IslandManager {
         for (long key : island.unlockedKeys()) chunks.add(ChunkPos.fromKey(key));
         final int cx = centerChunkX(island);
         final int cz = centerChunkZ(island);
+        final boolean full = island.hasSource();
         new BukkitRunnable() {
             int index = 0;
 
@@ -532,18 +675,19 @@ public final class IslandManager {
                     return;
                 }
                 ChunkPos rel = chunks.get(index++);
-                clearChunk(world.getChunkAt(cx + rel.x(), cz + rel.z()));
+                clearChunk(world.getChunkAt(cx + rel.x(), cz + rel.z()), full);
             }
         }.runTaskTimer(plugin, 1L, 1L);
     }
 
-    private void clearChunk(Chunk chunk) {
+    private void clearChunk(Chunk chunk, boolean full) {
         Settings s = plugin.settings();
         for (Entity e : chunk.getEntities()) {
             if (!(e instanceof Player)) e.remove();
         }
-        int minY = Math.max(world.getMinHeight(), s.surfaceY - s.fillerDepth - s.stoneDepth - 3);
-        int maxY = Math.min(world.getMaxHeight() - 1, s.surfaceY + 64);
+        int minY = full ? world.getMinHeight()
+                : Math.max(world.getMinHeight(), s.surfaceY - s.fillerDepth - s.stoneDepth - 3);
+        int maxY = full ? world.getMaxHeight() - 1 : Math.min(world.getMaxHeight() - 1, s.surfaceY + 64);
         for (int x = 0; x < 16; x++) {
             for (int z = 0; z < 16; z++) {
                 for (int y = minY; y <= maxY; y++) {

@@ -38,7 +38,8 @@ usage:
   kick: "<prefix><red>Použití: /chunk kick \\<hráč>"
   permission: "<prefix><red>Použití: /chunk permission \\<hráč> [oprávnění] [true/false]"
   mobs: "<prefix><red>Použití: /chunk mobs [on|off]"
-  admin: "<prefix><red>Použití: /chunk admin \\<reload|tp|unlock|delete> [hráč] [x] [z]"
+  admin: "<prefix><red>Použití: /chunk admin help"
+  switch: "<prefix><red>Použití: /chunk switch \\<majitel>"
 
 members:
   header: "<gold><bold>Členové chunku"
@@ -90,6 +91,27 @@ admin:
   unlock-invalid: "<prefix><red>Tenhle chunk nejde odemknout (není vedle odemčeného / je mimo rozsah)."
   unlocked: "<prefix><green>Chunk <yellow><x>, <z> <green>odemčen."
   deleted: "<prefix><green>Chunk hráče <yellow><player> <green>smazán."
+  lock-invalid: "<prefix><red>Tenhle chunk nejde zamknout (není odemčený, nebo je startovní)."
+  locked: "<prefix><green>Chunk <yellow><x>, <z> <green>zamčen."
+  reset-started: "<prefix><gray>Resetuji chunk hráče <yellow><player><gray>..."
+  list-header: "<prefix><gold>Chunky na serveru <gray>(<count>)"
+  list-entry: "<gray>- <white><owner> <dark_gray>[<green><unlocked> chunků<dark_gray>, <green><members> hráčů<dark_gray>]"
+  list-entry-online: "<gray>- <green><owner> <dark_gray>[<green><unlocked> chunků<dark_gray>, <green><members> hráčů<dark_gray>]"
+  list-more: "<gray>... a dalších <yellow><more>"
+  info:
+    - "<gold><bold>Chunk hráče <yellow><owner>"
+    - "<gray>Odemčeno: <green><unlocked><gray>/<green><max>"
+    - "<gray>Členové: <green><members>"
+    - "<gray>Spawn mobů: <green><mobs>"
+    - "<gray>Pozice ve světě (slot): <green><grid>"
+  not-member: "<prefix><red>Tenhle hráč není členem chunku."
+  member-added: "<prefix><green>Hráč <yellow><player> <green>přidán na chunk hráče <yellow><owner><green>."
+  member-removed: "<prefix><green>Hráč <yellow><player> <green>odebrán z chunku hráče <yellow><owner><green>."
+  mobs-set: "<prefix><green>Spawn mobů na chunku hráče <yellow><owner><green>: <yellow><value><green>."
+  refreshed: "<prefix><green>Cedulky chunku hráče <yellow><owner> <green>přegenerovány."
+  needs-header: "<prefix><gold>Požadavky chunků hráče <yellow><owner> <gray>(požadavek <dark_gray>/ <gray>kolik jde získat v sousedním chunku)"
+  needs-chunk: "<gray>Chunk <yellow><x>, <z><gray>:"
+  needs-line: "<gray>  - <white><item> <green><need> <dark_gray>/ <aqua><have>"
 
 mobs:
   owner-only: "<prefix><red>Spawn mobů může měnit jen majitel chunku."
@@ -146,3 +168,48 @@ perm:
   invite:
     name: "Zvaní"
     desc: "Zvaní dalších hráčů."
+
+help-more:
+  - "<yellow>/chunk list <gray>- chunky, kde jsi majitel nebo člen"
+  - "<yellow>/chunk switch \\<majitel> <gray>- přepnout chunk, na který tě teleportuje /chunk"
+  - "<yellow>/chunk invites <gray>- čekající pozvánky"
+  - "<yellow>/chunk map <gray>- mapa odemčených chunků"
+  - "<yellow>/chunk top <gray>- žebříček podle odemčených chunků"
+
+help-admin:
+  - "<gold><bold>ChunkLock <gray>- admin příkazy"
+  - "<yellow>/chunk admin reload <gray>- načíst konfiguraci"
+  - "<yellow>/chunk admin list <gray>- všechny chunky na serveru"
+  - "<yellow>/chunk admin info \\<hráč> <gray>- detail chunku"
+  - "<yellow>/chunk admin tp \\<hráč> <gray>- teleport na jeho chunk"
+  - "<yellow>/chunk admin unlock \\<hráč> \\<x> \\<z> <gray>- odemknout chunk"
+  - "<yellow>/chunk admin lock \\<hráč> \\<x> \\<z> <gray>- zamknout chunk zpět"
+  - "<yellow>/chunk admin reset \\<hráč> <gray>- resetovat chunk"
+  - "<yellow>/chunk admin delete \\<hráč> <gray>- smazat chunk"
+  - "<yellow>/chunk admin addmember|removemember \\<hráč> \\<člen> <gray>- správa členů"
+  - "<yellow>/chunk admin mobs \\<hráč> [on|off] <gray>- spawn mobů"
+  - "<yellow>/chunk admin refresh \\<hráč> <gray>- přegenerovat cedulky a požadavky"
+  - "<yellow>/chunk admin needs \\<hráč> <gray>- požadavky chunků vs. co jde v sousedním chunku získat"
+
+list:
+  header: "<prefix><gold>Tvoje chunky:"
+  entry: "<gray>- <white><owner> <dark_gray>[<green><unlocked> chunků<dark_gray>, <green><members> hráčů<dark_gray>]"
+  entry-active: "<gray>- <green><owner> <dark_gray>[<green><unlocked> chunků<dark_gray>, <green><members> hráčů<dark_gray>] <yellow>(aktivní)"
+
+switch:
+  not-member: "<prefix><red>Na tomhle chunku nejsi členem."
+  success: "<prefix><green>Aktivní chunk: <yellow><owner><green>. Teleport přes <white>/chunk<green>."
+
+invites:
+  header: "<prefix><gold>Čekající pozvánky:"
+  entry: "<gray>- <yellow><owner> <gray>(pozval <white><inviter><gray>, zbývá <white><seconds> s<gray>) <accept> <deny>"
+
+map:
+  header: "<prefix><gold>Mapa chunku <yellow><owner> <gray>(<green><unlocked><gray>/<green><max><gray>)"
+  legend:
+    - "<gray>Sever nahoře. <gold>◆ <gray>start  <green>■ <gray>odemčeno  <red>■ <gray>jde odemknout  <dark_gray>■ <gray>zamčeno  <yellow>◉ <gray>ty"
+
+top:
+  header: "<prefix><gold>Nejrozsáhlejší chunky:"
+  entry: "<gray>#<pos> <yellow><player> <dark_gray>- <green><unlocked> <gray>chunků"
+  own: "<gray>Ty jsi <yellow>#<pos> <dark_gray>- <green><unlocked> <gray>chunků"
