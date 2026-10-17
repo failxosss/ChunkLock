@@ -143,7 +143,7 @@ public final class Settings {
         worldName = cfg.getString("chunk-world.name", "chunkbasebase");
         createWorld = cfg.getBoolean("chunk-world.create-if-missing", true);
         voidRescue = cfg.getBoolean("chunk-world.void-rescue", true);
-        voidRescueY = cfg.getInt("chunk-world.void-rescue-below-y", 20);
+        voidRescueY = cfg.getInt("chunk-world.void-rescue-below-y", -72);
 
         worldGeneration = cfg.getString("generation.mode", "WORLD").equalsIgnoreCase("WORLD");
         sourceWorldName = cfg.getString("generation.world.name", "chunklock_source");

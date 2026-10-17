@@ -100,8 +100,10 @@ public final class IslandManager {
     /** Pod jakou výškou se hráč vrací zpět na ostrov (u ostrovů z normálního světa je to pod spodkem světa). */
     public int rescueY(Location loc) {
         Plot plot = plotAt(loc);
-        if (plot != null && plot.island().hasSource()) return world.getMinHeight() - 8;
-        return plugin.settings().voidRescueY;
+        if (plot != null && plot.island().hasSource()) return plugin.settings().voidRescueY;
+        // ploché ostrovy: kousek pod spodkem chunku
+        Settings s = plugin.settings();
+        return Math.max(world.getMinHeight(), s.surfaceY - s.fillerDepth - s.stoneDepth - 8);
     }
 
     private void beginGeneration(Island is) {

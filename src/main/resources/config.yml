@@ -12,7 +12,10 @@ chunk-world:
   create-if-missing: true
   # Když hráč spadne do voidu, vrátí se na svůj ostrov.
   void-rescue: true
-  void-rescue-below-y: 20
+  # Pod jakou výškou Y se hráč vrátí na ostrov (ostrovy zkopírované z normálního světa, generation.mode: WORLD).
+  # Ostrov sahá až do Y -64, proto je výchozí -72 (pod dnem světa). Když dáš např. -10, portne tě to zpět,
+  # jakmile klesneš pod Y -10 (pod tou výškou pak nejde kopat). Ploché ostrovy (mode: FLAT) se řídí jen svou výškou.
+  void-rescue-below-y: -72
 
 # Jak se chunky generují.
 #  WORLD = chunk se zkopíruje z normálního světa (biomy, jeskyně, rudy, struktury, truhly...)
