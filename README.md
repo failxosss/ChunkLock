@@ -114,3 +114,10 @@ Před `/chunk reset confirm`, `/chunk admin reset` a `/chunk admin delete` se ul
 `plugins/ChunkLock/data/backups` (`backup.keep-per-island` určuje, kolik se jich drží). `/chunk admin restore <záloha>`
 vrátí postup, členy a odemčené chunky a terén vygeneruje znovu. Stavby hráčů se neobnovují. Hráč nesmí mít jiný ostrov
 (po resetu nejdřív `/chunk admin delete <hráč>`).
+
+## Cedulky pod sebou
+
+`panel.stack` v `config.yml`: stejná cedulka se opakuje pod sebou každých `spacing` bloků (výchozí 10) až k bedrocku,
+všechna patra fungují stejně (klik, shift + klik, stejné počty). `max-levels` omezí počet pater (0 = až k bedrocku),
+`per-tick` kolik pater se postaví za tick. Každé patro je asi 10 entit, u velkého ostrova to jsou tisíce.
+

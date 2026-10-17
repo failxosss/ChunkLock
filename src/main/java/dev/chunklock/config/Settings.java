@@ -118,6 +118,11 @@ public final class Settings {
     public final double itemSpacing;
     public final float viewRange;
     public final boolean panelFixed;
+    /** Patra cedulek pod sebou (každých stackSpacing bloků až k bedrocku). */
+    public final boolean stackEnabled;
+    public final double stackSpacing;
+    public final int stackMaxLevels;
+    public final int stackPerTick;
 
     // členové
     public final int maxMembers;
@@ -227,6 +232,10 @@ public final class Settings {
         itemSpacing = cfg.getDouble("panel.item-spacing", 1.3);
         viewRange = (float) cfg.getDouble("panel.view-range", 0.6);
         panelFixed = cfg.getBoolean("panel.fixed", true);
+        stackEnabled = cfg.getBoolean("panel.stack.enabled", true);
+        stackSpacing = Math.max(3, cfg.getDouble("panel.stack.spacing", 10));
+        stackMaxLevels = Math.max(0, cfg.getInt("panel.stack.max-levels", 0));
+        stackPerTick = Math.max(1, cfg.getInt("panel.stack.per-tick", 6));
 
         maxMembers = Math.max(0, cfg.getInt("members.max-members", 5));
         inviteExpireSeconds = Math.max(5, cfg.getInt("members.invite-expire-seconds", 60));

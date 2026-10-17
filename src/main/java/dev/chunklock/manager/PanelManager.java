@@ -21,11 +21,14 @@ import org.bukkit.entity.Player;
 import org.bukkit.entity.TextDisplay;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.Transformation;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -83,16 +86,40 @@ public final class PanelManager {
         IslandManager im = plugin.islands();
         if (im.world() == null) return;
         List<Panel> list = new ArrayList<>();
+        Deque<Runnable> pending = new ArrayDeque<>(); // další patra cedulek (pod sebou), vznikají postupně
         for (ChunkPos locked : im.lockedFrontier(island)) {
             for (int[] d : IslandManager.DIRS) {
                 if (island.isUnlocked(locked.offset(d[0], d[1]))) {
-                    list.add(build(island, locked, d));
+                    build(island, locked, d, list, pending);
                 }
             }
         }
         panels.put(island.owner(), list);
         World w = im.world();
         for (Player p : w.getPlayers()) syncVisibility(p, list);
+        if (!pending.isEmpty()) buildStack(island.owner(), list, pending);
+    }
+
+    /** Postaví další patra cedulek po několika za tick (jinak by server při velkém počtu entit zaseknul). */
+    private void buildStack(UUID owner, List<Panel> list, Deque<Runnable> pending) {
+        final int perTick = Math.max(1, plugin.settings().stackPerTick);
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                if (panels.get(owner) != list) { // cedulky mezitím zrušeny / přegenerovány
+                    cancel();
+                    return;
+                }
+                for (int i = 0; i < perTick && !pending.isEmpty(); i++) {
+                    try {
+                        pending.poll().run();
+                    } catch (RuntimeException ex) {
+                        plugin.getLogger().log(java.util.logging.Level.WARNING, "Stavba patra cedulky selhala", ex);
+                    }
+                }
+                if (pending.isEmpty()) cancel();
+            }
+        }.runTaskTimer(plugin, 1L, 1L);
     }
 
     /** Řádek s cenou vidí jen hráči s permisí pro nákup za peníze. */
@@ -221,11 +248,21 @@ public final class PanelManager {
 
     // ---------------------------------------------------------------- stavba cedulky
 
-    private Panel build(Island island, ChunkPos locked, int[] dir) {
+    /** Spodní hranice pro patra cedulek: bedrock (dno světa u ostrovů z normálního světa). */
+    private double bottomY(Island island, World w) {
+        Settings s = plugin.settings();
+        if (island.hasSource()) return w.getMinHeight();
+        return Math.max(w.getMinHeight(), s.surfaceY - s.fillerDepth - s.stoneDepth - (s.bedrockBottom ? 1 : 0));
+    }
+
+    /**
+     * Postaví cedulku u hrany zamčeného chunku (horní patro hned) a naplánuje stejné cedulky
+     * pod ní každých panel.stack.spacing bloků až k bedrocku.
+     */
+    private void build(Island island, ChunkPos locked, int[] dir, List<Panel> list, Deque<Runnable> pending) {
         Settings s = plugin.settings();
         IslandManager im = plugin.islands();
         World w = im.world();
-        Panel panel = new Panel(locked);
 
         double minX = (im.centerChunkX(island) + locked.x()) << 4;
         double minZ = (im.centerChunkZ(island) + locked.z()) << 4;
@@ -244,9 +281,31 @@ public final class PanelManager {
             tx = 1;
             tz = 0;
         }
-        double base = surfaceAt(island, w, dir, minX, minZ, px, pz) + 1 + s.panelHeight;
+        final double top = surfaceAt(island, w, dir, minX, minZ, px, pz) + 1 + s.panelHeight;
         // cedulka je natočená k odemčenému sousedovi (tam stojí hráči); 0 = jih, 90 = západ, 180 = sever, -90 = východ
         final float yaw = dir[1] > 0 ? 0f : dir[1] < 0 ? 180f : dir[0] < 0 ? 90f : -90f;
+
+        list.add(buildAt(island, locked, w, px, pz, tx, tz, top, yaw));
+        if (!s.stackEnabled) return;
+        final double bottom = bottomY(island, w);
+        final double step = Math.max(3.0, s.stackSpacing);
+        final int extra = s.stackMaxLevels > 0 ? s.stackMaxLevels : Integer.MAX_VALUE;
+        for (int level = 1; level <= extra; level++) {
+            final double base = top - level * step;
+            if (base < bottom) break;
+            pending.add(() -> {
+                Panel p = buildAt(island, locked, w, px, pz, tx, tz, base, yaw);
+                list.add(p);
+                for (Player pl : w.getPlayers()) syncVisibility(pl, List.of(p));
+            });
+        }
+    }
+
+    /** Jedno patro cedulky (titulek, itemy, počty, ceny a klikací hitbox) s dolním okrajem ve výšce base. */
+    private Panel buildAt(Island island, ChunkPos locked, World w, double px, double pz, double tx, double tz,
+                          double base, float yaw) {
+        Settings s = plugin.settings();
+        Panel panel = new Panel(locked);
 
         List<Settings.Requirement> items = plugin.unlocks().requirements(island, locked);
         int n = items.size();
