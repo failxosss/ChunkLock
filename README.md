@@ -38,6 +38,7 @@ Na GitHubu se plugin sestaví sám (záložka **Actions** -> poslední běh -> *
 | `/chunk admin needs <hráč>` | požadavky zamčených chunků vs. kolik jde v sousedním chunku získat |
 | `/chunk admin backups [hráč]` | zálohy ostrovů (klikací [obnovit]) |
 | `/chunk admin restore <záloha>` | obnoví smazaný ostrov ze zálohy |
+| `/chunk admin give <hráč> [počet]` | odemykací svitek na `počet` chunků zdarma |
 
 Oprávnění členů: `build, break, interact, containers, animals, unlock, invite`.
 
@@ -121,3 +122,12 @@ vrátí postup, členy a odemčené chunky a terén vygeneruje znovu. Stavby hr�
 všechna patra fungují stejně (klik, shift + klik, stejné počty). `max-levels` omezí počet pater (0 = až k bedrocku),
 `per-tick` kolik pater se postaví za tick. Každé patro je asi 10 entit, u velkého ostrova to jsou tisíce.
 
+## Odemykací svitek
+
+`/chunk admin give <hráč> 10` dá hráči item (výchozí Nether star, `unlock-token` v configu), který odemkne 10 chunků zdarma.
+Hráč s ním v ruce klikne na cedulku zamčeného chunku (pravým i levým), chunk se odemkne a počet nábojů klesne
+na 9; při nule svitek zmizí. Počet nábojů je uložený v itemu a vypisuje se v jeho popisu. Svitek smí použít každý
+člen ostrova, jen na chunk, který jde odemknout (sousedí s odemčeným).
+
+Svitek jde omezit na majitele a členy s oprávněním `unlock`: v `config.yml` nastav `unlock-token.require-permission: true`
+(výchozí `false` = smí ho použít každý člen ostrova).

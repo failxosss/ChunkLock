@@ -23,6 +23,7 @@ import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Enemy;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -40,7 +41,7 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
             "leave", "members", "permission", "mobs", "reset", "list", "switch", "invites", "map", "top", "contributions",
             "help");
     private static final List<String> ADMIN_SUBS = List.of("reload", "tp", "unlock", "lock", "delete", "reset",
-            "list", "info", "addmember", "removemember", "mobs", "refresh", "needs", "backups", "restore");
+            "list", "info", "addmember", "removemember", "mobs", "refresh", "needs", "backups", "restore", "give");
 
     private final ChunkLockPlugin plugin;
 
@@ -750,6 +751,7 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
                     }
                 }
             }
+            case "give" -> give(sender, args);
             case "backups" -> backups(sender, args.length >= 3 ? args[2] : null);
             case "restore" -> restore(sender, args);
             case "refresh" -> {
@@ -761,6 +763,37 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
             }
             default -> adminUsage(sender);
         }
+    }
+
+    /** /chunk admin give <hráč> [počet] - odemykací svitek na "počet" odemčení chunků zdarma. */
+    private void give(CommandSender sender, String[] args) {
+        if (args.length < 3) {
+            msg().send(sender, "admin.give-usage");
+            return;
+        }
+        Player target = Bukkit.getPlayerExact(args[2]);
+        if (target == null) {
+            msg().send(sender, "player-not-found");
+            return;
+        }
+        int count = 1;
+        if (args.length >= 4) {
+            try {
+                count = Integer.parseInt(args[3]);
+            } catch (NumberFormatException ex) {
+                count = 0;
+            }
+        }
+        if (count < 1 || count > 1000) {
+            msg().send(sender, "admin.give-usage");
+            return;
+        }
+        ItemStack token = plugin.unlocks().tokens().create(count);
+        for (ItemStack rest : target.getInventory().addItem(token).values()) { // plný inventář: spadne na zem
+            target.getWorld().dropItemNaturally(target.getLocation(), rest);
+        }
+        msg().send(sender, "admin.give-done", ph("player", target.getName()), ph("count", count));
+        msg().send(target, "token.received", ph("count", count));
     }
 
     /** /chunk admin backups [hráč] - zálohy ostrovů (před resetem / smazáním). */
@@ -837,6 +870,11 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
         if (sub.equals("admin") && sender.hasPermission("chunklock.admin")) {
             if (args.length == 2) return filter(new ArrayList<>(ADMIN_SUBS), args[1]);
             String asub = args[1].toLowerCase(Locale.ROOT);
+            if (args.length == 3 && asub.equals("give")) {
+                for (Player online : Bukkit.getOnlinePlayers()) out.add(online.getName());
+                return filter(out, args[2]);
+            }
+            if (args.length == 4 && asub.equals("give")) return filter(List.of("1", "5", "10", "25"), args[3]);
             if (args.length == 3 && asub.equals("restore")) {
                 for (File f : plugin.storage().listBackups(null)) out.add(f.getName().replaceFirst("\\.yml$", ""));
                 return filter(out, args[2]);

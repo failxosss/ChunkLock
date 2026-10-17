@@ -112,6 +112,8 @@ admin:
   needs-header: "<prefix><gold>Požadavky chunků hráče <yellow><owner> <gray>(požadavek <dark_gray>/ <gray>kolik jde získat v sousedním chunku)"
   needs-chunk: "<gray>Chunk <yellow><x>, <z><gray>:"
   needs-line: "<gray>  - <white><item> <green><need> <dark_gray>/ <aqua><have>"
+  give-usage: "<prefix><red>Použití: /chunk admin give \\<hráč> [počet]"
+  give-done: "<prefix><green>Hráč <yellow><player> <green>dostal odemykací svitek na <yellow><count> <green>chunků."
   backups-none: "<prefix><red>Žádné zálohy."
   backups-header: "<prefix><gold>Zálohy ostrovů <gray>(<count>)"
   backups-entry: "<gray>- <white><name> <button>"
@@ -208,6 +210,7 @@ help-admin:
   - "<yellow>/chunk admin needs \\<hráč> <gray>- požadavky chunků vs. co jde v sousedním chunku získat"
   - "<yellow>/chunk admin backups [hráč] <gray>- zálohy chunků (vznikají před resetem a smazáním)"
   - "<yellow>/chunk admin restore \\<záloha> <gray>- obnovit chunk ze zálohy"
+  - "<yellow>/chunk admin give \\<hráč> [počet] <gray>- odemykací svitek (kolik chunků zdarma odemkne)"
 
 list:
   header: "<prefix><gold>Tvoje chunky:"
@@ -226,6 +229,16 @@ map:
   header: "<prefix><gold>Mapa chunku <yellow><owner> <gray>(<green><unlocked><gray>/<green><max><gray>)"
   legend:
     - "<gray>Sever nahoře. <gold>◆ <gray>start  <green>■ <gray>odemčeno  <red>■ <gray>jde odemknout  <dark_gray>■ <gray>zamčeno  <yellow>◉ <gray>ty"
+
+token:
+  name: "<gold><bold>Odemykací svitek"
+  lore:
+    - "<gray>Klikni s ním na cedulku zamčeného chunku"
+    - "<gray>a chunk se odemkne <green>zdarma<gray>."
+    - "<yellow>Zbývá odemčení: <green><left><gray>/<green><max>"
+  received: "<prefix><green>Dostal jsi odemykací svitek na <yellow><count> <green>chunků."
+  used: "<prefix><green>Chunk odemčen svitkem. Zbývá odemčení: <yellow><left><green>."
+  used-last: "<prefix><green>Chunk odemčen svitkem. <gray>Svitek byl vyčerpán."
 
 contributions:
   none: "<prefix><gray>Na chunku hráče <yellow><owner> <gray>zatím nikdo nic neodevzdal."

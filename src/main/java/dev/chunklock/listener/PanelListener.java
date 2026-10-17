@@ -79,6 +79,10 @@ public final class PanelListener implements Listener {
         }
         if (island == null) return;
 
+        if (plugin.unlocks().tokens().isToken(player.getInventory().getItemInMainHand())) {
+            plugin.unlocks().useToken(player, island, rel); // odemykací svitek v ruce = odemčení zdarma
+            return;
+        }
         if (player.isSneaking()) {
             plugin.unlocks().pay(player, island, rel);
         } else {

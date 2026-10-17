@@ -32,9 +32,15 @@ import static dev.chunklock.config.Messages.ph;
 public final class UnlockService {
 
     private final ChunkLockPlugin plugin;
+    private final TokenService tokens;
 
     public UnlockService(ChunkLockPlugin plugin) {
         this.plugin = plugin;
+        this.tokens = new TokenService(plugin);
+    }
+
+    public TokenService tokens() {
+        return tokens;
     }
 
     public Settings.Tier tierFor(Island island) {
@@ -393,6 +399,17 @@ public final class UnlockService {
             plugin.storage().saveIsland(island);
             plugin.panels().refresh(island, rel);
         }
+    }
+
+    /** Hráč klikl na cedulku se svitkem v ruce - chunk se odemkne zdarma a svitek ztratí jeden náboj. */
+    public void useToken(Player player, Island island, ChunkPos rel) {
+        // unlock-token.require-permission: true = jen majitel a členové s oprávněním "unlock", false = každý člen
+        boolean needPermission = plugin.getConfig().getBoolean("unlock-token.require-permission", false);
+        if (!check(player, island, rel, needPermission)) return;
+        int left = tokens.consume(player);
+        if (left < 0) return;
+        plugin.messages().send(player, left > 0 ? "token.used" : "token.used-last", ph("left", left));
+        complete(player, island, rel);
     }
 
     /** Hráč kliknul se shiftem - zaplatí zbytek penězi. */
