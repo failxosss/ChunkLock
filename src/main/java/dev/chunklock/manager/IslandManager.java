@@ -46,6 +46,8 @@ public final class IslandManager {
     private final Random random = new Random();
     /** Majitelé smazaných ostrovů, kteří byli offline - při připojení je teleportuje na delete.location. */
     private final Set<UUID> pendingDelete = new HashSet<>();
+    /** Majitelé ostrovů, kterým se po smazání ještě uklízí bloky (do té doby nejde obnovit záloha). */
+    private final Set<UUID> clearing = new HashSet<>();
     private int nextSlot;
     private int spacing;
     private World world;
@@ -603,6 +605,7 @@ public final class IslandManager {
 
     /** initiator může být null (admin reset cizího ostrova, majitel offline). */
     public void resetIsland(Island island, Player initiator) {
+        plugin.storage().backupIsland(island, "reset");
         plugin.panels().suspend(island.owner()); // během resetu se žádné cedulky nesmí objevit
         for (Player p : playersInside(island)) sendToReset(p);
         Bukkit.getScheduler().runTaskLater(plugin, () -> clearIsland(island, () -> {
@@ -633,6 +636,7 @@ public final class IslandManager {
     }
 
     public void deleteIsland(Island island) {
+        plugin.storage().backupIsland(island, "delete");
         // hráči stojící na ostrově + majitel (ať je kdekoliv) se teleportují na delete.location
         Set<UUID> targets = new LinkedHashSet<>();
         for (Player p : playersInside(island)) targets.add(p.getUniqueId());
@@ -654,7 +658,55 @@ public final class IslandManager {
         active.values().removeIf(owner -> owner.equals(island.owner()));
         plugin.storage().deleteIsland(island.owner());
         saveState();
-        Bukkit.getScheduler().runTaskLater(plugin, () -> clearIsland(island, null), 20L);
+        clearing.add(island.owner());
+        Bukkit.getScheduler().runTaskLater(plugin, () -> clearIsland(island, () -> clearing.remove(island.owner())), 20L);
+    }
+
+    public enum RestoreResult { OK, HAS_ISLAND, SLOT_TAKEN, CLEARING }
+
+    /**
+     * Obnoví ostrov ze zálohy: vrátí data (odemčené chunky, postup, členy, příspěvky) a znovu vygeneruje
+     * terén všech odemčených chunků (ze stejného místa zdrojového světa). Co hráči postavili, se neobnoví.
+     */
+    public RestoreResult restoreIsland(Island restored) {
+        if (islands.containsKey(restored.owner())) return RestoreResult.HAS_ISLAND;
+        if (clearing.contains(restored.owner())) return RestoreResult.CLEARING;
+        if (bySlot.containsKey(slotKey(restored.gridX(), restored.gridZ()))) return RestoreResult.SLOT_TAKEN;
+
+        islands.put(restored.owner(), restored);
+        bySlot.put(slotKey(restored.gridX(), restored.gridZ()), restored);
+        if (pendingDelete.remove(restored.owner())) plugin.storage().savePendingDelete(pendingDelete);
+        saveState();
+        plugin.storage().saveIsland(restored);
+
+        List<ChunkPos> chunks = new ArrayList<>();
+        for (long key : restored.unlockedKeys()) chunks.add(ChunkPos.fromKey(key));
+        chunks.sort(java.util.Comparator.comparingInt(ChunkPos::distance));
+
+        plugin.panels().suspend(restored.owner());
+        beginGeneration(restored);
+        regenerate(restored, chunks, 0, () -> {
+            endGeneration(restored);
+            plugin.storage().saveIsland(restored);
+            plugin.panels().resume(restored.owner());
+            plugin.panels().spawn(restored);
+        });
+        return RestoreResult.OK;
+    }
+
+    /** Generuje chunky jeden po druhém (kopírování terénu je asynchronní). */
+    private void regenerate(Island is, List<ChunkPos> chunks, int index, Runnable done) {
+        if (index >= chunks.size()) {
+            done.run();
+            return;
+        }
+        Runnable next = () -> regenerate(is, chunks, index + 1, done);
+        try {
+            generateChunk(is, chunks.get(index), false, next);
+        } catch (RuntimeException ex) {
+            plugin.getLogger().log(java.util.logging.Level.WARNING, "Obnova chunku selhala", ex);
+            next.run();
+        }
     }
 
     /** Vymaže bloky odemčených chunků, jeden chunk za tick. */

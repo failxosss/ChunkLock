@@ -117,6 +117,14 @@ island:
         - { material: DIAMOND_ORE,  amount: 20, chance: 100, vein-size: 3, min-depth: 18, max-depth: 27 }
         - { material: EMERALD_ORE,  amount: 4,  chance: 50,  vein-size: 1, min-depth: 14, max-depth: 27 }
 
+# Zálohy ostrovů: před /chunk reset confirm, /chunk admin reset a /chunk admin delete se uloží kopie ostrova
+# do plugins/ChunkLock/data/backups. Seznam: /chunk admin backups, obnova: /chunk admin restore <záloha>.
+# Obnoví se postup, členové a odemčené chunky (terén se vygeneruje znovu), ne stavby hráčů.
+backup:
+  enabled: true
+  # Kolik záloh se drží u jednoho ostrova (nejstarší se mažou). 0 = neomezeně.
+  keep-per-island: 10
+
 # Co se stane s hráči na ostrově při /chunk reset confirm.
 reset:
   # Kam se hráči teleportují před smazáním chunku (prázdný world = spawn hlavního světa).
@@ -221,6 +229,27 @@ unlock:
     max-items: 3
     # Množství se náhodně mění o +/- tolik procent (0 = vždy přesně podle tieru).
     amount-variance: 30
+  # Obtížnost podle vzdálenosti od startovního chunku. Nejbližší chunky mají základní požadavky,
+  # každý další chunk vzdálenosti přidá per-chunk % (množství itemů i cena), nejvýš max-bonus %.
+  # Platí pro nově spočítané požadavky; u už spočítaných zamčených chunků pomůže /chunk admin refresh <hráč>.
+  # V režimu CHUNK pořád platí strop max-share-per-item (z chunku se nikdy nechce víc, než v něm je).
+  distance:
+    enabled: true
+    # CHEBYSHEV = po "prstencích" kolem startu (čtverec), MANHATTAN = počet kroků od startu (kosočtverec)
+    metric: CHEBYSHEV
+    # O kolik % se požadavky zvýší za každý chunk vzdálenosti navíc (první prstenec je základ)
+    per-chunk: 10
+    # Nejvyšší příplatek v %
+    max-bonus: 150
+    # Zdražit i odemčení za peníze
+    apply-to-money: true
+  # Týmové odemykání: postup u zamčeného chunku je společný pro celý ostrov.
+  team:
+    # true = itemy může odevzdat každý člen (i bez oprávnění "unlock"), oprávnění pak chrání jen platbu penězi.
+    # false = odevzdávat smí jen člen s oprávněním "unlock" (jako dřív).
+    deliver-without-permission: true
+    # Ostatním členům online se napíše, kdo co přidal a kolik % chunku je splněno.
+    notify: true
   money:
     # Odemčení za peníze (shift + klik na cedulku). Vyžaduje Vault + ekonomiku.
     enabled: true
@@ -230,6 +259,12 @@ unlock:
     # cenu na cedulce vůbec neuvidí a nemůžou platit. Prázdné = smí každý.
     # Dej ji skupině v LuckPerms: /lp group vip permission set chunklock.buy true
     permission: "chunklock.buy"
+    # Slevy při platbě penězi podle permise (platí ta nejvyšší, kterou hráč má). Hodnota = sleva v %.
+    # Na cedulce je vždy základní cena, sleva se projeví až při placení. Prázdné = žádné slevy.
+    # Dej ji skupině v LuckPerms: /lp group vip permission set chunklock.discount.vip true
+    discounts:
+      chunklock.discount.vip: 10
+      chunklock.discount.mvp: 20
   # Požadavky podle počtu už odemčených chunků ("from"). V režimu CHUNK se z tiers používá jen cena v penězích
   # (money) a požadavky na itemy slouží jako záloha, kdyby se chunk nedal naskenovat.
   tiers:

@@ -95,6 +95,20 @@ public final class Settings {
     public final boolean moneyEnabled;
     public final boolean reduceByProgress;
     public final List<Tier> tiers;
+    /** Obtížnost podle vzdálenosti od startovního chunku. */
+    public final boolean distanceEnabled;
+    public final boolean distanceManhattan;
+    public final double distancePerChunk;
+    public final double distanceMax;
+    public final boolean distanceMoney;
+    /** Permise -> sleva v % při platbě penězi (platí nejvyšší, kterou hráč má). */
+    public final Map<String, Double> moneyDiscounts;
+    /** Týmové odemykání. */
+    public final boolean teamDeliverWithoutPermission;
+    public final boolean teamNotify;
+    /** Zálohy ostrovů před resetem / smazáním. */
+    public final boolean backupEnabled;
+    public final int backupKeep;
 
     // panel
     public final double panelHeight;
@@ -181,6 +195,30 @@ public final class Settings {
         moneyEnabled = cfg.getBoolean("unlock.money.enabled", true);
         reduceByProgress = cfg.getBoolean("unlock.money.reduce-by-progress", true);
         tiers = readTiers(cfg, log);
+
+        distanceEnabled = cfg.getBoolean("unlock.distance.enabled", true);
+        distanceManhattan = "MANHATTAN".equalsIgnoreCase(cfg.getString("unlock.distance.metric", "CHEBYSHEV"));
+        distancePerChunk = Math.max(0, cfg.getDouble("unlock.distance.per-chunk", 10));
+        distanceMax = Math.max(0, cfg.getDouble("unlock.distance.max-bonus", 150));
+        distanceMoney = cfg.getBoolean("unlock.distance.apply-to-money", true);
+
+        Map<String, Double> discounts = new java.util.LinkedHashMap<>();
+        ConfigurationSection disc = cfg.getConfigurationSection("unlock.money.discounts");
+        if (disc != null) {
+            // klíče obsahují tečky (chunklock.discount.vip), Bukkit je načte jako vnořené sekce -> hledáme do hloubky
+            for (String perm : disc.getKeys(true)) {
+                if (!(disc.get(perm) instanceof Number n)) continue;
+                double pct = n.doubleValue();
+                if (pct > 0) discounts.put(perm, Math.min(100, pct));
+            }
+        }
+        moneyDiscounts = Map.copyOf(discounts);
+
+        teamDeliverWithoutPermission = cfg.getBoolean("unlock.team.deliver-without-permission", true);
+        teamNotify = cfg.getBoolean("unlock.team.notify", true);
+
+        backupEnabled = cfg.getBoolean("backup.enabled", true);
+        backupKeep = Math.max(0, cfg.getInt("backup.keep-per-island", 10));
 
         panelHeight = cfg.getDouble("panel.height", 1.0);
         panelOffset = cfg.getDouble("panel.offset", 1.5);

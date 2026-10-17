@@ -48,6 +48,10 @@ public final class Island {
     /** Spočítané požadavky zamčených chunků (drží se, aby se čísla na cedulce nepřepisovala). */
     private final Map<Long, Map<Material, Integer>> required = new HashMap<>();
     private final Map<UUID, Member> members = new LinkedHashMap<>();
+    /** Kolik itemů celkem odevzdal každý hráč (týmové odemykání). */
+    private final Map<UUID, Integer> contributions = new HashMap<>();
+    /** Kdo kolik odevzdal u jednotlivých zamčených chunků (maže se při odemčení). */
+    private final Map<Long, Map<UUID, Integer>> contributors = new HashMap<>();
     private boolean mobSpawning = true;
     /** Počátek terénu ve zdrojovém světě (chunk souřadnice); null = ostrov je plochý (starý způsob). */
     private Integer sourceX;
@@ -147,6 +151,8 @@ public final class Island {
         progress.clear();
         resources.clear();
         required.clear();
+        contributions.clear();
+        contributors.clear();
         created = System.currentTimeMillis();
         unlocked.add(new ChunkPos(0, 0).key());
     }
@@ -168,6 +174,36 @@ public final class Island {
 
     public void clearProgress(ChunkPos rel) {
         progress.remove(rel.key());
+        contributors.remove(rel.key());
+    }
+
+    // ---- příspěvky členů ----
+
+    public void addContribution(ChunkPos rel, UUID who, int amount) {
+        if (amount <= 0) return;
+        contributions.merge(who, amount, Integer::sum);
+        contributors.computeIfAbsent(rel.key(), k -> new HashMap<>()).merge(who, amount, Integer::sum);
+    }
+
+    public Map<UUID, Integer> contributions() {
+        return contributions;
+    }
+
+    public Map<Long, Map<UUID, Integer>> allContributors() {
+        return contributors;
+    }
+
+    /** Kdo přispěl k jednomu chunku (nikdy null). */
+    public Map<UUID, Integer> contributorsOf(ChunkPos rel) {
+        Map<UUID, Integer> map = contributors.get(rel.key());
+        return map == null ? Map.of() : map;
+    }
+
+    /** Jméno majitele / člena (nebo "?"). */
+    public String nameOf(UUID uuid) {
+        if (owner.equals(uuid)) return ownerName;
+        Member m = members.get(uuid);
+        return m == null ? "?" : m.name();
     }
 
     public Map<Long, Map<Material, Integer>> allProgress() {

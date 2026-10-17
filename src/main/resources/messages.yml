@@ -112,6 +112,18 @@ admin:
   needs-header: "<prefix><gold>Požadavky chunků hráče <yellow><owner> <gray>(požadavek <dark_gray>/ <gray>kolik jde získat v sousedním chunku)"
   needs-chunk: "<gray>Chunk <yellow><x>, <z><gray>:"
   needs-line: "<gray>  - <white><item> <green><need> <dark_gray>/ <aqua><have>"
+  backups-none: "<prefix><red>Žádné zálohy."
+  backups-header: "<prefix><gold>Zálohy ostrovů <gray>(<count>)"
+  backups-entry: "<gray>- <white><name> <button>"
+  backups-restore-button: "<green>[obnovit]"
+  backups-more: "<gray>... a dalších <yellow><more>"
+  restore-usage: "<prefix><red>Použití: /chunk admin restore \\<záloha> <gray>(seznam: /chunk admin backups)"
+  restore-not-found: "<prefix><red>Záloha <yellow><name> <red>neexistuje."
+  restore-invalid: "<prefix><red>Zálohu nejde přečíst."
+  restore-has-island: "<prefix><red>Hráč <yellow><player> <red>už má chunk. Nejdřív ho smaž: <white>/chunk admin delete <player>"
+  restore-slot-taken: "<prefix><red>Místo ve světě, kde ostrov stál, už je obsazené."
+  restore-clearing: "<prefix><red>Smazaný ostrov se ještě uklízí, zkus to za chvíli."
+  restore-started: "<prefix><green>Obnovuji chunk hráče <yellow><player> <gray>(<chunks> chunků)<green>. Stavby hráče se neobnovují, jen terén a postup."
 
 mobs:
   owner-only: "<prefix><red>Spawn mobů může měnit jen majitel chunku."
@@ -128,7 +140,10 @@ unlock:
   money-disabled: "<prefix><red>Odemčení za peníze není dostupné."
   not-enough-money: "<prefix><red>Nemáš dost peněz. Potřebuješ <yellow><price><red>."
   paid: "<prefix><green>Zaplaceno <yellow><price><green>."
+  paid-discount: "<prefix><green>Zaplaceno <yellow><price> <gray>(sleva <green><percent> %<gray>)<green>."
   success: "<prefix><green><bold>Chunk <yellow><x>, <z> <green><bold>byl odemčen!"
+  contributors: "<prefix><gray>Na odemčení se podíleli: <yellow><list>"
+  team-delivered: "<prefix><yellow><player> <gray>přidal <green><items> <gray>k chunku <yellow><x>, <z> <dark_gray>(<percent> %)"
 
 protection:
   locked: "<red>Tenhle chunk je zamčený!"
@@ -175,6 +190,7 @@ help-more:
   - "<yellow>/chunk invites <gray>- čekající pozvánky"
   - "<yellow>/chunk map <gray>- mapa odemčených chunků"
   - "<yellow>/chunk top <gray>- žebříček podle odemčených chunků"
+  - "<yellow>/chunk contributions <gray>- kolik kdo odevzdal na odemykání"
 
 help-admin:
   - "<gold><bold>ChunkLock <gray>- admin příkazy"
@@ -190,6 +206,8 @@ help-admin:
   - "<yellow>/chunk admin mobs \\<hráč> [on|off] <gray>- spawn mobů"
   - "<yellow>/chunk admin refresh \\<hráč> <gray>- přegenerovat cedulky a požadavky"
   - "<yellow>/chunk admin needs \\<hráč> <gray>- požadavky chunků vs. co jde v sousedním chunku získat"
+  - "<yellow>/chunk admin backups [hráč] <gray>- zálohy chunků (vznikají před resetem a smazáním)"
+  - "<yellow>/chunk admin restore \\<záloha> <gray>- obnovit chunk ze zálohy"
 
 list:
   header: "<prefix><gold>Tvoje chunky:"
@@ -208,6 +226,11 @@ map:
   header: "<prefix><gold>Mapa chunku <yellow><owner> <gray>(<green><unlocked><gray>/<green><max><gray>)"
   legend:
     - "<gray>Sever nahoře. <gold>◆ <gray>start  <green>■ <gray>odemčeno  <red>■ <gray>jde odemknout  <dark_gray>■ <gray>zamčeno  <yellow>◉ <gray>ty"
+
+contributions:
+  none: "<prefix><gray>Na chunku hráče <yellow><owner> <gray>zatím nikdo nic neodevzdal."
+  header: "<prefix><gold>Příspěvky na chunku <yellow><owner><gold>:"
+  entry: "<gray>#<pos> <yellow><player> <dark_gray>- <green><items> <gray>itemů"
 
 top:
   header: "<prefix><gold>Nejrozsáhlejší chunky:"

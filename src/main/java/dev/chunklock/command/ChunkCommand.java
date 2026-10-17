@@ -24,6 +24,7 @@ import org.bukkit.entity.Enemy;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -36,9 +37,10 @@ import static dev.chunklock.config.Messages.ph;
 public final class ChunkCommand implements CommandExecutor, TabCompleter {
 
     private static final List<String> SUBS = List.of("home", "info", "invite", "accept", "deny", "kick",
-            "leave", "members", "permission", "mobs", "reset", "list", "switch", "invites", "map", "top", "help");
+            "leave", "members", "permission", "mobs", "reset", "list", "switch", "invites", "map", "top", "contributions",
+            "help");
     private static final List<String> ADMIN_SUBS = List.of("reload", "tp", "unlock", "lock", "delete", "reset",
-            "list", "info", "addmember", "removemember", "mobs", "refresh", "needs");
+            "list", "info", "addmember", "removemember", "mobs", "refresh", "needs", "backups", "restore");
 
     private final ChunkLockPlugin plugin;
 
@@ -89,6 +91,7 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
             case "invites" -> invites(p);
             case "map" -> map(p);
             case "top" -> top(p);
+            case "contributions", "contrib", "team" -> contributions(p);
             default -> sendHelp(p);
         }
         return true;
@@ -540,6 +543,28 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
         }
     }
 
+    /** /chunk contributions - kolik itemů kdo odevzdal na aktivním chunku (týmové odemykání). */
+    private void contributions(Player p) {
+        Island island = islands().activeIsland(p.getUniqueId());
+        if (island == null) {
+            msg().send(p, "no-active-island");
+            return;
+        }
+        List<Map.Entry<UUID, Integer>> sorted = new ArrayList<>(island.contributions().entrySet());
+        sorted.sort((a, b) -> Integer.compare(b.getValue(), a.getValue()));
+        if (sorted.isEmpty()) {
+            msg().send(p, "contributions.none", ph("owner", island.ownerName()));
+            return;
+        }
+        msg().send(p, "contributions.header", ph("owner", island.ownerName()));
+        int shown = Math.min(10, sorted.size());
+        for (int i = 0; i < shown; i++) {
+            Map.Entry<UUID, Integer> e = sorted.get(i);
+            msg().send(p, "contributions.entry", ph("pos", i + 1), ph("player", island.nameOf(e.getKey())),
+                    ph("items", e.getValue()));
+        }
+    }
+
     // ------------------------------------------------------------------ admin
 
     private void admin(CommandSender sender, String[] args) {
@@ -725,6 +750,8 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
                     }
                 }
             }
+            case "backups" -> backups(sender, args.length >= 3 ? args[2] : null);
+            case "restore" -> restore(sender, args);
             case "refresh" -> {
                 Island island = adminIsland(sender, args);
                 if (island == null) return;
@@ -733,6 +760,51 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
                 msg().send(sender, "admin.refreshed", ph("owner", island.ownerName()));
             }
             default -> adminUsage(sender);
+        }
+    }
+
+    /** /chunk admin backups [hráč] - zálohy ostrovů (před resetem / smazáním). */
+    private void backups(CommandSender sender, String filter) {
+        List<File> files = plugin.storage().listBackups(filter);
+        if (files.isEmpty()) {
+            msg().send(sender, "admin.backups-none");
+            return;
+        }
+        msg().send(sender, "admin.backups-header", ph("count", files.size()));
+        int shown = Math.min(15, files.size());
+        for (int i = 0; i < shown; i++) {
+            String name = files.get(i).getName().replaceFirst("\\.yml$", "");
+            Component button = msg().get("admin.backups-restore-button")
+                    .clickEvent(ClickEvent.suggestCommand("/chunk admin restore " + name));
+            msg().send(sender, "admin.backups-entry", ph("name", name), Placeholder.component("button", button));
+        }
+        if (files.size() > shown) {
+            msg().send(sender, "admin.backups-more", ph("more", files.size() - shown));
+        }
+    }
+
+    /** /chunk admin restore <záloha> - obnoví smazaný (nebo resetovaný a pak smazaný) ostrov. */
+    private void restore(CommandSender sender, String[] args) {
+        if (args.length < 3) {
+            msg().send(sender, "admin.restore-usage");
+            return;
+        }
+        File file = plugin.storage().findBackup(args[2]);
+        if (file == null) {
+            msg().send(sender, "admin.restore-not-found", ph("name", args[2]));
+            return;
+        }
+        Island restored = plugin.storage().readBackup(file);
+        if (restored == null) {
+            msg().send(sender, "admin.restore-invalid");
+            return;
+        }
+        switch (islands().restoreIsland(restored)) {
+            case OK -> msg().send(sender, "admin.restore-started", ph("player", restored.ownerName()),
+                    ph("chunks", restored.unlockedCount()));
+            case HAS_ISLAND -> msg().send(sender, "admin.restore-has-island", ph("player", restored.ownerName()));
+            case SLOT_TAKEN -> msg().send(sender, "admin.restore-slot-taken");
+            case CLEARING -> msg().send(sender, "admin.restore-clearing");
         }
     }
 
@@ -765,6 +837,10 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
         if (sub.equals("admin") && sender.hasPermission("chunklock.admin")) {
             if (args.length == 2) return filter(new ArrayList<>(ADMIN_SUBS), args[1]);
             String asub = args[1].toLowerCase(Locale.ROOT);
+            if (args.length == 3 && asub.equals("restore")) {
+                for (File f : plugin.storage().listBackups(null)) out.add(f.getName().replaceFirst("\\.yml$", ""));
+                return filter(out, args[2]);
+            }
             if (args.length == 3 && !asub.equals("list") && !asub.equals("reload")) {
                 for (Island i : islands().all()) out.add(i.ownerName());
                 return filter(out, args[2]);

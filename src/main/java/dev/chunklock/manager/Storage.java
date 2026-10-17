@@ -29,6 +29,7 @@ public final class Storage {
 
     private final ChunkLockPlugin plugin;
     private final File islandsDir;
+    private final File backupsDir;
     private final File stateFile;
     private final File pendingFile;
     private final Object writeLock = new Object();
@@ -37,6 +38,7 @@ public final class Storage {
         this.plugin = plugin;
         File dataDir = new File(plugin.getDataFolder(), "data");
         this.islandsDir = new File(dataDir, "islands");
+        this.backupsDir = new File(dataDir, "backups");
         this.stateFile = new File(dataDir, "state.yml");
         this.pendingFile = new File(dataDir, "pending-delete.yml");
         if (!islandsDir.exists() && !islandsDir.mkdirs()) {
@@ -63,6 +65,10 @@ public final class Storage {
     private Island read(File file) {
         YamlConfiguration y = YamlConfiguration.loadConfiguration(file);
         UUID owner = UUID.fromString(file.getName().substring(0, file.getName().length() - 4));
+        return read(y, owner, file);
+    }
+
+    private Island read(YamlConfiguration y, UUID owner, File file) {
         Island island = new Island(owner, y.getString("owner-name", "?"), y.getInt("grid-x"), y.getInt("grid-z"));
 
         for (String s : y.getStringList("unlocked")) {
@@ -115,6 +121,36 @@ public final class Storage {
                     if (m != null && n > 0) items.put(m, n);
                 }
                 if (!items.isEmpty()) island.setRequired(ChunkPos.parse(chunkKey), items);
+            }
+        }
+
+        ConfigurationSection contrib = y.getConfigurationSection("contributions");
+        if (contrib != null) {
+            for (String uuidStr : contrib.getKeys(false)) {
+                try {
+                    int n = contrib.getInt(uuidStr);
+                    if (n > 0) island.contributions().put(UUID.fromString(uuidStr), n);
+                } catch (IllegalArgumentException ignored) {
+                    // poškozený záznam
+                }
+            }
+        }
+        ConfigurationSection byChunk = y.getConfigurationSection("contributors");
+        if (byChunk != null) {
+            for (String chunkKey : byChunk.getKeys(false)) {
+                ConfigurationSection sec = byChunk.getConfigurationSection(chunkKey);
+                if (sec == null) continue;
+                try {
+                    ChunkPos pos = ChunkPos.parse(chunkKey);
+                    Map<UUID, Integer> map = new HashMap<>();
+                    for (String uuidStr : sec.getKeys(false)) {
+                        int n = sec.getInt(uuidStr);
+                        if (n > 0) map.put(UUID.fromString(uuidStr), n);
+                    }
+                    if (!map.isEmpty()) island.allContributors().put(pos.key(), map);
+                } catch (IllegalArgumentException ignored) {
+                    // poškozený záznam
+                }
             }
         }
 
@@ -208,6 +244,16 @@ public final class Storage {
             }
         }
 
+        for (Map.Entry<UUID, Integer> e : is.contributions().entrySet()) {
+            if (e.getValue() > 0) y.set("contributions." + e.getKey(), e.getValue());
+        }
+        for (Map.Entry<Long, Map<UUID, Integer>> e : is.allContributors().entrySet()) {
+            String chunk = ChunkPos.fromKey(e.getKey()).serialize();
+            for (Map.Entry<UUID, Integer> c : e.getValue().entrySet()) {
+                if (c.getValue() > 0) y.set("contributors." + chunk + "." + c.getKey(), c.getValue());
+            }
+        }
+
         for (Map.Entry<UUID, Island.Member> e : is.members().entrySet()) {
             String base = "members." + e.getKey();
             y.set(base + ".name", e.getValue().name());
@@ -270,6 +316,80 @@ public final class Storage {
             return;
         }
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> write(y, pendingFile));
+    }
+
+    // ---------------------------------------------------------------- zálohy
+
+    /**
+     * Uloží kopii ostrova (aktuální stav z paměti) do data/backups. Zapisuje se hned (synchronně),
+     * protože ostrov se vzápětí maže / resetuje. Vrací soubor zálohy, nebo null (vypnuto / chyba).
+     */
+    public File backupIsland(Island island, String reason) {
+        if (!plugin.settings().backupEnabled) return null;
+        try {
+            YamlConfiguration y = serialize(island);
+            y.set("owner", island.owner().toString());
+            y.set("backup-reason", reason);
+            y.set("backup-time", System.currentTimeMillis());
+            String name = island.ownerName().replaceAll("[^A-Za-z0-9_]", "_");
+            String stamp = new java.text.SimpleDateFormat("yyyyMMdd-HHmmss").format(new java.util.Date());
+            String prefix = name + "_" + island.owner().toString().substring(0, 8) + "_" + stamp + "_" + reason;
+            File file = new File(backupsDir, prefix + ".yml");
+            for (int i = 2; file.exists(); i++) file = new File(backupsDir, prefix + "-" + i + ".yml");
+            write(y, file);
+            plugin.getLogger().info("Záloha ostrova " + island.ownerName() + ": " + file.getName());
+            pruneBackups(island.owner());
+            return file;
+        } catch (RuntimeException ex) {
+            plugin.getLogger().log(Level.SEVERE, "Nelze zálohovat ostrov " + island.ownerName(), ex);
+            return null;
+        }
+    }
+
+    private void pruneBackups(UUID owner) {
+        int keep = plugin.settings().backupKeep;
+        if (keep <= 0) return;
+        String marker = "_" + owner.toString().substring(0, 8) + "_";
+        List<File> mine = new ArrayList<>();
+        for (File f : listBackups(null)) {
+            if (f.getName().contains(marker)) mine.add(f);
+        }
+        for (int i = keep; i < mine.size(); i++) { // seznam je od nejnovější
+            if (!mine.get(i).delete()) plugin.getLogger().warning("Nelze smazat starou zálohu " + mine.get(i).getName());
+        }
+    }
+
+    /** Zálohy od nejnovější; filter (část jména souboru, bez ohledu na velikost písmen) může být null. */
+    public List<File> listBackups(String filter) {
+        List<File> out = new ArrayList<>();
+        File[] files = backupsDir.listFiles((dir, name) -> name.endsWith(".yml"));
+        if (files == null) return out;
+        String f = filter == null ? null : filter.toLowerCase(java.util.Locale.ROOT);
+        for (File file : files) {
+            if (f == null || file.getName().toLowerCase(java.util.Locale.ROOT).contains(f)) out.add(file);
+        }
+        out.sort((a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+        return out;
+    }
+
+    /** Najde zálohu podle jména (s .yml nebo bez). Jen bezpečné znaky, nic mimo složku backups. */
+    public File findBackup(String name) {
+        if (name == null || !name.matches("[A-Za-z0-9_.\\-]+")) return null;
+        File f = new File(backupsDir, name.endsWith(".yml") ? name : name + ".yml");
+        return f.isFile() ? f : null;
+    }
+
+    /** Načte ostrov ze zálohy, nebo null když je soubor poškozený. */
+    public Island readBackup(File file) {
+        try {
+            YamlConfiguration y = YamlConfiguration.loadConfiguration(file);
+            String owner = y.getString("owner");
+            if (owner == null) return null;
+            return read(y, UUID.fromString(owner), file);
+        } catch (RuntimeException ex) {
+            plugin.getLogger().log(Level.WARNING, "Nelze načíst zálohu " + file.getName(), ex);
+            return null;
+        }
     }
 
     public void deleteIsland(UUID owner) {

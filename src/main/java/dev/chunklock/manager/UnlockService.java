@@ -50,6 +50,29 @@ public final class UnlockService {
      * pro každý chunk deterministicky (podle ostrova + pozice chunku) vybere jiná kombinace a množství.
      */
     private List<Settings.Requirement> tierRequirements(Island island, ChunkPos rel) {
+        List<Settings.Requirement> base = tierBase(island, rel);
+        double mult = distanceMultiplier(rel);
+        if (mult == 1.0) return base;
+        List<Settings.Requirement> out = new ArrayList<>(base.size());
+        for (Settings.Requirement r : base) {
+            out.add(new Settings.Requirement(r.material(), Math.max(1, (int) Math.round(r.amount() * mult))));
+        }
+        return out;
+    }
+
+    /**
+     * Obtížnost podle vzdálenosti od startovního chunku: 1.0 u nejbližších chunků, pak roste o per-chunk %
+     * za každý další chunk vzdálenosti, nejvýš o max-bonus %.
+     */
+    public double distanceMultiplier(ChunkPos rel) {
+        Settings s = plugin.settings();
+        if (!s.distanceEnabled) return 1.0;
+        int dist = s.distanceManhattan ? Math.abs(rel.x()) + Math.abs(rel.z()) : rel.distance();
+        double bonus = Math.min(s.distanceMax, s.distancePerChunk * Math.max(0, dist - 1));
+        return 1.0 + bonus / 100.0;
+    }
+
+    private List<Settings.Requirement> tierBase(Island island, ChunkPos rel) {
         Settings.Tier tier = tierFor(island);
         List<Settings.Requirement> pool = tier.items();
         ConfigurationSection v = plugin.getConfig().getConfigurationSection("unlock.variation");
@@ -204,11 +227,12 @@ public final class UnlockService {
         picked.sort(Comparator.comparingInt(c -> order.indexOf(c.rule())));
 
         double variance = s.shareVariance / 100.0;
+        double distMult = distanceMultiplier(rel);
         Map<Material, Integer> out = new LinkedHashMap<>();
         for (Candidate c : picked) {
             double factor = 1.0 + (rnd.nextDouble() * 2.0 - 1.0) * variance;
             int cap = Math.max(1, (int) Math.floor(c.pool() * s.maxSharePerItem / 100.0));
-            int amount = (int) Math.round(c.pool() * share * factor);
+            int amount = (int) Math.round(c.pool() * share * factor * distMult);
             amount = Math.max(amount, s.chunkMinAmount);
             amount = Math.min(amount, Math.min(c.rule().max(), cap));
             amount = Math.min(amount, c.pool());
@@ -263,6 +287,7 @@ public final class UnlockService {
         Settings.Tier tier = tierFor(island);
         List<Settings.Requirement> reqs = requirements(island, rel);
         double price = tier.money();
+        price *= distanceMoney(rel);
         if (plugin.settings().reduceByProgress && !reqs.isEmpty()) {
             int total = 0;
             int left = 0;
@@ -273,6 +298,27 @@ public final class UnlockService {
             if (total > 0) price = price * left / total;
         }
         return Math.round(price * 100.0) / 100.0;
+    }
+
+    private double distanceMoney(ChunkPos rel) {
+        return plugin.settings().distanceMoney ? distanceMultiplier(rel) : 1.0;
+    }
+
+    /** Sleva v % pro hráče: nejvyšší z unlock.money.discounts, na kterou má permisi. */
+    public double discountPercent(Player player) {
+        double best = 0;
+        for (Map.Entry<String, Double> e : plugin.settings().moneyDiscounts.entrySet()) {
+            if (e.getValue() > best && player.hasPermission(e.getKey())) best = e.getValue();
+        }
+        return best;
+    }
+
+    /** Cena pro konkrétního hráče (po slevě). */
+    public double price(Player player, Island island, ChunkPos rel) {
+        double base = price(island, rel);
+        double off = discountPercent(player);
+        if (off <= 0) return base;
+        return Math.round(base * (100.0 - off)) / 100.0;
     }
 
     public boolean moneyAvailable(Island island) {
@@ -294,13 +340,13 @@ public final class UnlockService {
 
     // ---------------------------------------------------------------- akce
 
-    private boolean check(Player player, Island island, ChunkPos rel) {
+    private boolean check(Player player, Island island, ChunkPos rel, boolean needPermission) {
         Messages msg = plugin.messages();
         if (!island.isMember(player.getUniqueId())) {
             msg.send(player, "unlock.not-member");
             return false;
         }
-        if (!island.hasPermission(player.getUniqueId(), IslandPermission.UNLOCK)) {
+        if (needPermission && !island.hasPermission(player.getUniqueId(), IslandPermission.UNLOCK)) {
             msg.send(player, "unlock.no-permission");
             return false;
         }
@@ -313,7 +359,8 @@ public final class UnlockService {
 
     /** Hráč klikl na cedulku - odevzdá itemy z inventáře. */
     public void deliver(Player player, Island island, ChunkPos rel) {
-        if (!check(player, island, rel)) return;
+        // týmové odemykání: itemy může odevzdat každý člen (UNLOCK permise pak hlídá jen platbu penězi)
+        if (!check(player, island, rel, !plugin.settings().teamDeliverWithoutPermission)) return;
         Messages msg = plugin.messages();
 
         StringBuilder summary = new StringBuilder();
@@ -324,6 +371,7 @@ public final class UnlockService {
             int taken = takeItems(player, req.material(), need);
             if (taken <= 0) continue;
             island.addProgress(rel, req.material(), taken);
+            island.addContribution(rel, player.getUniqueId(), taken);
             totalTaken += taken;
             if (summary.length() > 0) summary.append(", ");
             summary.append(taken).append("x ").append(pretty(req.material()));
@@ -334,7 +382,10 @@ public final class UnlockService {
             msg.send(player, "unlock.no-items");
             return;
         }
-        if (totalTaken > 0) msg.send(player, "unlock.delivered", ph("items", summary));
+        if (totalTaken > 0) {
+            msg.send(player, "unlock.delivered", ph("items", summary));
+            if (!complete) notifyTeam(player, island, rel, summary.toString());
+        }
 
         if (complete) {
             complete(player, island, rel);
@@ -346,7 +397,7 @@ public final class UnlockService {
 
     /** Hráč kliknul se shiftem - zaplatí zbytek penězi. */
     public void pay(Player player, Island island, ChunkPos rel) {
-        if (!check(player, island, rel)) return;
+        if (!check(player, island, rel, true)) return;
         Messages msg = plugin.messages();
         if (!canPay(player)) {
             msg.send(player, "unlock.no-buy-permission");
@@ -357,18 +408,25 @@ public final class UnlockService {
             return;
         }
         EconomyHook eco = plugin.economy();
-        double price = price(island, rel);
+        double price = price(player, island, rel);
+        double discount = discountPercent(player);
         if (price > 0) {
             if (!eco.has(player, price) || !eco.withdraw(player, price)) {
                 msg.send(player, "unlock.not-enough-money", ph("price", formatPrice(price)));
                 return;
             }
-            msg.send(player, "unlock.paid", ph("price", formatPrice(price)));
+            if (discount > 0) {
+                msg.send(player, "unlock.paid-discount", ph("price", formatPrice(price)),
+                        ph("percent", trim(discount)));
+            } else {
+                msg.send(player, "unlock.paid", ph("price", formatPrice(price)));
+            }
         }
         complete(player, island, rel);
     }
 
     private void complete(Player player, Island island, ChunkPos rel) {
+        String contributors = contributorSummary(island, rel); // dřív, než unlockChunk smaže postup
         plugin.islands().unlockChunk(island, rel);
         Set<UUID> ids = new HashSet<>(island.members().keySet());
         ids.add(island.owner());
@@ -376,9 +434,50 @@ public final class UnlockService {
             Player p = Bukkit.getPlayer(id);
             if (p != null) {
                 plugin.messages().send(p, "unlock.success", ph("x", rel.x()), ph("z", rel.z()));
+                if (contributors != null) plugin.messages().send(p, "unlock.contributors", ph("list", contributors));
             }
         }
         player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1f, 1f);
+    }
+
+    /** "Alex (40), Bob (12)" - kdo přispěl k chunku; null když přispěl jen jeden (nebo nikdo). */
+    private String contributorSummary(Island island, ChunkPos rel) {
+        Map<UUID, Integer> map = island.contributorsOf(rel);
+        if (map.size() < 2) return null;
+        List<Map.Entry<UUID, Integer>> entries = new ArrayList<>(map.entrySet());
+        entries.sort((a, b) -> Integer.compare(b.getValue(), a.getValue()));
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<UUID, Integer> e : entries) {
+            if (sb.length() > 0) sb.append(", ");
+            sb.append(island.nameOf(e.getKey())).append(" (").append(e.getValue()).append(')');
+        }
+        return sb.toString();
+    }
+
+    /** Dá vědět ostatním členům online, že někdo přidal itemy k odemčení chunku. */
+    private void notifyTeam(Player from, Island island, ChunkPos rel, String items) {
+        if (!plugin.settings().teamNotify) return;
+        int total = 0;
+        int done = 0;
+        for (Settings.Requirement r : requirements(island, rel)) {
+            total += r.amount();
+            done += Math.min(r.amount(), island.progress(rel, r.material()));
+        }
+        int percent = total <= 0 ? 100 : (int) Math.floor(done * 100.0 / total);
+        Set<UUID> ids = new HashSet<>(island.members().keySet());
+        ids.add(island.owner());
+        ids.remove(from.getUniqueId());
+        for (UUID id : ids) {
+            Player p = Bukkit.getPlayer(id);
+            if (p != null) {
+                plugin.messages().send(p, "unlock.team-delivered", ph("player", from.getName()),
+                        ph("items", items), ph("x", rel.x()), ph("z", rel.z()), ph("percent", percent));
+            }
+        }
+    }
+
+    private static String trim(double v) {
+        return v == Math.floor(v) ? String.valueOf((long) v) : String.valueOf(v);
     }
 
     private int takeItems(Player player, Material material, int amount) {

@@ -29,12 +29,15 @@ Na GitHubu se plugin sestaví sám (záložka **Actions** -> poslední běh -> *
 | `/chunk invites` | čekající pozvánky (klikací) |
 | `/chunk map` | textová mapa odemčených chunků |
 | `/chunk top` | žebříček podle odemčených chunků |
+| `/chunk contributions` | kolik itemů kdo z týmu odevzdal na odemykání |
 
 > `/chunk admin delete <hráč>` teleportuje majitele (a hráče na ostrově) na `delete.location` z configu a spustí `delete.commands`. Svět pro chunky se nastavuje v `chunk-world.name` (výchozí `chunkbasebase`).
 | `/chunk admin reload\|list\|info\|tp\|unlock\|lock\|reset\|delete` | admin (`chunklock.admin`) |
 | `/chunk admin addmember\|removemember <hráč> <člen>` | správa členů cizího chunku |
 | `/chunk admin mobs <hráč> [on\|off]`, `/chunk admin refresh <hráč>` | spawn mobů / přegenerování cedulek a požadavků |
 | `/chunk admin needs <hráč>` | požadavky zamčených chunků vs. kolik jde v sousedním chunku získat |
+| `/chunk admin backups [hráč]` | zálohy ostrovů (klikací [obnovit]) |
+| `/chunk admin restore <záloha>` | obnoví smazaný ostrov ze zálohy |
 
 Oprávnění členů: `build, break, interact, containers, animals, unlock, invite`.
 
@@ -86,3 +89,28 @@ Seznam surovin (`unlock.chunk.resources`) jde upravit nebo rozšířit. `unlock.
 z `unlock.tiers`. V režimu CHUNK se z `tiers` používá jen cena v penězích. `/chunk admin reload` a
 `/chunk admin refresh <hráč>` požadavky spočítají znovu. `/chunk admin needs <hráč>` ukáže požadavek a vedle něj,
 kolik dané věci v sousedním chunku je.
+
+## Obtížnost podle vzdálenosti od startu
+
+`unlock.distance` v `config.yml`: nejbližší zamčené chunky mají základní požadavky, každý další chunk vzdálenosti
+přidá `per-chunk` % (itemy i cena v penězích), nejvýš `max-bonus` %. `metric`: `CHEBYSHEV` (prstence) nebo `MANHATTAN`
+(kroky od startu). Platí pro nově spočítané požadavky; u už spočítaných pomůže `/chunk admin refresh <hráč>`.
+V režimu CHUNK pořád platí strop `max-share-per-item`.
+
+## Týmové odemykání
+
+Postup u zamčeného chunku je společný pro celý ostrov. S `unlock.team.deliver-without-permission: true` může itemy
+odevzdat každý člen (oprávnění `unlock` pak chrání jen platbu penězi). Ostatním členům online se napíše, kdo co přidal
+a kolik % je hotovo (`unlock.team.notify`), po odemčení se vypíše, kdo se podílel. `/chunk contributions` ukazuje žebříček.
+
+## Slevy při platbě penězi
+
+`unlock.money.discounts`: permise -> sleva v % (platí nejvyšší, kterou hráč má), např. `chunklock.discount.vip: 10`.
+Na cedulce je vždy základní cena, sleva se projeví až při placení (SHIFT + klik).
+
+## Zálohy ostrovů
+
+Před `/chunk reset confirm`, `/chunk admin reset` a `/chunk admin delete` se uloží kopie ostrova do
+`plugins/ChunkLock/data/backups` (`backup.keep-per-island` určuje, kolik se jich drží). `/chunk admin restore <záloha>`
+vrátí postup, členy a odemčené chunky a terén vygeneruje znovu. Stavby hráčů se neobnovují. Hráč nesmí mít jiný ostrov
+(po resetu nejdřív `/chunk admin delete <hráč>`).
