@@ -2,6 +2,7 @@ package dev.chunklock.manager;
 
 import dev.chunklock.ChunkLockPlugin;
 import dev.chunklock.model.ChunkPos;
+import dev.chunklock.model.Dimension;
 import dev.chunklock.model.Island;
 import dev.chunklock.model.IslandPermission;
 import org.bukkit.Bukkit;
@@ -28,33 +29,37 @@ public final class Storage {
     public record State(int nextSlot, int spacing, Map<UUID, UUID> active) {}
 
     private final ChunkLockPlugin plugin;
-    private final File islandsDir;
+    private final Map<Dimension, File> islandsDirs = new java.util.EnumMap<>(Dimension.class);
+    private final Map<Dimension, File> stateFiles = new java.util.EnumMap<>(Dimension.class);
     private final File backupsDir;
-    private final File stateFile;
     private final File pendingFile;
     private final Object writeLock = new Object();
 
     public Storage(ChunkLockPlugin plugin) {
         this.plugin = plugin;
         File dataDir = new File(plugin.getDataFolder(), "data");
-        this.islandsDir = new File(dataDir, "islands");
         this.backupsDir = new File(dataDir, "backups");
-        this.stateFile = new File(dataDir, "state.yml");
         this.pendingFile = new File(dataDir, "pending-delete.yml");
-        if (!islandsDir.exists() && !islandsDir.mkdirs()) {
-            plugin.getLogger().severe("Nelze vytvořit složku " + islandsDir);
+        for (Dimension d : Dimension.values()) {
+            // overworld zůstává ve starých složkách (islands, state.yml), Nether a End mají vlastní
+            File dir = new File(dataDir, d == Dimension.OVERWORLD ? "islands" : "islands-" + d.id());
+            islandsDirs.put(d, dir);
+            stateFiles.put(d, new File(dataDir, d == Dimension.OVERWORLD ? "state.yml" : "state-" + d.id() + ".yml"));
+            if (!dir.exists() && !dir.mkdirs()) {
+                plugin.getLogger().severe("Nelze vytvořit složku " + dir);
+            }
         }
     }
 
     // ---------------------------------------------------------------- load
 
-    public List<Island> loadIslands() {
+    public List<Island> loadIslands(Dimension dim) {
         List<Island> out = new ArrayList<>();
-        File[] files = islandsDir.listFiles((dir, name) -> name.endsWith(".yml"));
+        File[] files = islandsDirs.get(dim).listFiles((dir, name) -> name.endsWith(".yml"));
         if (files == null) return out;
         for (File f : files) {
             try {
-                out.add(read(f));
+                out.add(read(f, dim));
             } catch (Exception ex) {
                 plugin.getLogger().log(Level.SEVERE, "Nelze načíst ostrov " + f.getName(), ex);
             }
@@ -62,14 +67,17 @@ public final class Storage {
         return out;
     }
 
-    private Island read(File file) {
+    private Island read(File file, Dimension dim) {
         YamlConfiguration y = YamlConfiguration.loadConfiguration(file);
         UUID owner = UUID.fromString(file.getName().substring(0, file.getName().length() - 4));
-        return read(y, owner, file);
+        return read(y, owner, file, dim);
     }
 
-    private Island read(YamlConfiguration y, UUID owner, File file) {
-        Island island = new Island(owner, y.getString("owner-name", "?"), y.getInt("grid-x"), y.getInt("grid-z"));
+    private Island read(YamlConfiguration y, UUID owner, File file, Dimension dim) {
+        Island island = new Island(dim, null, owner, y.getString("owner-name", "?"), y.getInt("grid-x"),
+                y.getInt("grid-z"));
+        island.setDragonKilled(y.getBoolean("dragon-killed", false));
+        if (y.contains("ref-y")) island.setRefY(y.getInt("ref-y"));
 
         for (String s : y.getStringList("unlocked")) {
             island.unlock(ChunkPos.parse(s));
@@ -185,8 +193,8 @@ public final class Storage {
         }
     }
 
-    public State loadState(int defaultSpacing) {
-        YamlConfiguration y = YamlConfiguration.loadConfiguration(stateFile);
+    public State loadState(Dimension dim, int defaultSpacing) {
+        YamlConfiguration y = YamlConfiguration.loadConfiguration(stateFiles.get(dim));
         Map<UUID, UUID> active = new HashMap<>();
         ConfigurationSection sec = y.getConfigurationSection("active");
         if (sec != null) {
@@ -208,7 +216,9 @@ public final class Storage {
         y.set("owner-name", is.ownerName());
         y.set("grid-x", is.gridX());
         y.set("grid-z", is.gridZ());
-        y.set("mob-spawning", is.mobSpawning());
+        y.set("mob-spawning", is.parent() != null ? true : is.mobSpawning());
+        if (is.dragonKilled()) y.set("dragon-killed", true);
+        if (is.hasRefY()) y.set("ref-y", is.refY());
         if (is.hasSource()) {
             y.set("source-x", is.srcX());
             y.set("source-z", is.srcZ());
@@ -254,7 +264,9 @@ public final class Storage {
             }
         }
 
-        for (Map.Entry<UUID, Island.Member> e : is.members().entrySet()) {
+        // členy drží ostrov v overworldu, Nether a End je jen odkazují
+        for (Map.Entry<UUID, Island.Member> e : (is.parent() != null ? java.util.Map.<UUID, Island.Member>of()
+                : is.members()).entrySet()) {
             String base = "members." + e.getKey();
             y.set(base + ".name", e.getValue().name());
             List<String> perms = new ArrayList<>();
@@ -264,13 +276,13 @@ public final class Storage {
         return y;
     }
 
-    private File islandFile(UUID owner) {
-        return new File(islandsDir, owner + ".yml");
+    private File islandFile(Dimension dim, UUID owner) {
+        return new File(islandsDirs.get(dim), owner + ".yml");
     }
 
     public void saveIsland(Island island) {
         YamlConfiguration y = serialize(island);
-        File file = islandFile(island.owner());
+        File file = islandFile(island.dimension(), island.owner());
         if (!plugin.isEnabled()) {
             write(y, file);
             return;
@@ -278,7 +290,8 @@ public final class Storage {
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> write(y, file));
     }
 
-    public void saveState(int nextSlot, int spacing, Map<UUID, UUID> active) {
+    public void saveState(Dimension dim, int nextSlot, int spacing, Map<UUID, UUID> active) {
+        File stateFile = stateFiles.get(dim);
         YamlConfiguration y = new YamlConfiguration();
         y.set("next-slot", nextSlot);
         y.set("spacing", spacing);
@@ -329,16 +342,18 @@ public final class Storage {
         try {
             YamlConfiguration y = serialize(island);
             y.set("owner", island.owner().toString());
+            y.set("dimension", island.dimension().id());
             y.set("backup-reason", reason);
             y.set("backup-time", System.currentTimeMillis());
             String name = island.ownerName().replaceAll("[^A-Za-z0-9_]", "_");
             String stamp = new java.text.SimpleDateFormat("yyyyMMdd-HHmmss").format(new java.util.Date());
-            String prefix = name + "_" + island.owner().toString().substring(0, 8) + "_" + stamp + "_" + reason;
+            String tag = island.dimension() == Dimension.OVERWORLD ? "" : island.dimension().id() + "-";
+            String prefix = name + "_" + island.owner().toString().substring(0, 8) + "_" + stamp + "_" + tag + reason;
             File file = new File(backupsDir, prefix + ".yml");
             for (int i = 2; file.exists(); i++) file = new File(backupsDir, prefix + "-" + i + ".yml");
             write(y, file);
             plugin.getLogger().info("Záloha ostrova " + island.ownerName() + ": " + file.getName());
-            pruneBackups(island.owner());
+            pruneBackups(island.owner(), tag);
             return file;
         } catch (RuntimeException ex) {
             plugin.getLogger().log(Level.SEVERE, "Nelze zálohovat ostrov " + island.ownerName(), ex);
@@ -346,13 +361,18 @@ public final class Storage {
         }
     }
 
-    private void pruneBackups(UUID owner) {
+    private void pruneBackups(UUID owner, String tag) {
         int keep = plugin.settings().backupKeep;
         if (keep <= 0) return;
         String marker = "_" + owner.toString().substring(0, 8) + "_";
         List<File> mine = new ArrayList<>();
         for (File f : listBackups(null)) {
-            if (f.getName().contains(marker)) mine.add(f);
+            String n = f.getName();
+            if (!n.contains(marker)) continue;
+            boolean nether = n.contains("_nether-");
+            boolean end = n.contains("_end-");
+            boolean same = tag.isEmpty() ? (!nether && !end) : n.contains("_" + tag);
+            if (same) mine.add(f);
         }
         for (int i = keep; i < mine.size(); i++) { // seznam je od nejnovější
             if (!mine.get(i).delete()) plugin.getLogger().warning("Nelze smazat starou zálohu " + mine.get(i).getName());
@@ -385,15 +405,15 @@ public final class Storage {
             YamlConfiguration y = YamlConfiguration.loadConfiguration(file);
             String owner = y.getString("owner");
             if (owner == null) return null;
-            return read(y, UUID.fromString(owner), file);
+            return read(y, UUID.fromString(owner), file, Dimension.parse(y.getString("dimension", "overworld")));
         } catch (RuntimeException ex) {
             plugin.getLogger().log(Level.WARNING, "Nelze načíst zálohu " + file.getName(), ex);
             return null;
         }
     }
 
-    public void deleteIsland(UUID owner) {
-        File f = islandFile(owner);
+    public void deleteIsland(Dimension dim, UUID owner) {
+        File f = islandFile(dim, owner);
         synchronized (writeLock) {
             if (f.exists() && !f.delete()) {
                 plugin.getLogger().warning("Nelze smazat " + f.getName());

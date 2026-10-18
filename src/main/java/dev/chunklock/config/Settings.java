@@ -1,5 +1,6 @@
 package dev.chunklock.config;
 
+import dev.chunklock.model.Dimension;
 import dev.chunklock.model.IslandPermission;
 import org.bukkit.Material;
 import org.bukkit.TreeType;
@@ -44,6 +45,10 @@ public final class Settings {
 
     public enum ListMode { NONE, BLACKLIST, WHITELIST }
 
+    /** Nastavení jedné dimenze: svět pro ostrovy, zdrojový svět terénu, rozsah odemykání, hledání startu. */
+    public record DimensionSettings(boolean enabled, String world, String sourceWorld, Long seed, int maxRadius,
+                                    int startRange) {}
+
     public record CommandRule(ListMode mode, Set<String> commands) {}
 
     // svět
@@ -81,6 +86,14 @@ public final class Settings {
     /** true = požadavky se počítají podle surovin v sousedním chunku, false = pevné tiery. */
     public final boolean chunkMode;
     public final List<ResourceRule> resourceRules;
+    private final Map<Dimension, List<ResourceRule>> rulesByDim = new java.util.EnumMap<>(Dimension.class);
+    private final Map<Dimension, Set<Material>> blocksByDim = new java.util.EnumMap<>(Dimension.class);
+    private final Map<Dimension, DimensionSettings> dimensions = new java.util.EnumMap<>(Dimension.class);
+    /** Další světy (kromě chunk světa), ve kterých portály vedou hráče na jeho nether / end ostrov. */
+    public final Set<String> extraPortalWorlds;
+    /** End: spawnovat draka na ostrově a jak daleko od středu ostrova se může vzdálit. */
+    public final boolean dragonEnabled;
+    public final int dragonLeash;
     /** Všechny bloky, které se při skenu chunku počítají. */
     public final Set<Material> resourceBlocks;
     public final double shareStart;
@@ -177,11 +190,20 @@ public final class Settings {
         startTrees = readTrees(cfg.getConfigurationSection("island.start-chunk.trees"), log);
         unlockedTrees = readTrees(cfg.getConfigurationSection("island.unlocked-chunks.trees"), log);
 
-        List<ResourceRule> resourceList = readResources(cfg, log);
+        List<ResourceRule> resourceList = readResources(cfg, "unlock.chunk.resources", log);
         resourceRules = List.copyOf(resourceList);
         Set<Material> blocks = EnumSet.noneOf(Material.class);
         for (ResourceRule r : resourceList) blocks.addAll(r.blocks());
         resourceBlocks = Set.copyOf(blocks);
+        rulesByDim.put(Dimension.OVERWORLD, resourceRules);
+        blocksByDim.put(Dimension.OVERWORLD, resourceBlocks);
+        for (Dimension d : new Dimension[]{Dimension.NETHER, Dimension.END}) {
+            List<ResourceRule> list = List.copyOf(readResources(cfg, "unlock.chunk.resources-" + d.id(), log));
+            Set<Material> set = EnumSet.noneOf(Material.class);
+            for (ResourceRule r : list) set.addAll(r.blocks());
+            rulesByDim.put(d, list);
+            blocksByDim.put(d, Set.copyOf(set));
+        }
         boolean wantChunk = !"TIERS".equalsIgnoreCase(cfg.getString("unlock.mode", "CHUNK"));
         if (wantChunk && resourceList.isEmpty()) {
             log.warning("unlock.chunk.resources je prázdné - používám pevné tiery.");
@@ -200,6 +222,16 @@ public final class Settings {
         moneyEnabled = cfg.getBoolean("unlock.money.enabled", true);
         reduceByProgress = cfg.getBoolean("unlock.money.reduce-by-progress", true);
         tiers = readTiers(cfg, log);
+
+        dimensions.put(Dimension.OVERWORLD, new DimensionSettings(true, worldName, sourceWorldName, sourceSeed,
+                maxRadius, startRange));
+        dimensions.put(Dimension.NETHER, readDimension(cfg, Dimension.NETHER, "chunkbasebase_nether",
+                "chunklock_source_nether", 8, 2000));
+        dimensions.put(Dimension.END, readDimension(cfg, Dimension.END, "chunkbasebase_the_end",
+                "chunklock_source_end", 4, 0));
+        extraPortalWorlds = lowerSet(cfg.getStringList("dimensions.extra-portal-worlds"));
+        dragonEnabled = cfg.getBoolean("dimensions.end.dragon.enabled", true);
+        dragonLeash = Math.max(40, cfg.getInt("dimensions.end.dragon.leash-radius", 160));
 
         distanceEnabled = cfg.getBoolean("unlock.distance.enabled", true);
         distanceManhattan = "MANHATTAN".equalsIgnoreCase(cfg.getString("unlock.distance.metric", "CHEBYSHEV"));
@@ -284,6 +316,43 @@ public final class Settings {
         String w = world.toLowerCase(Locale.ROOT);
         if (chunkDisabledWorlds.contains(w)) return false;
         return chunkEnabledWorlds.contains("*") || chunkEnabledWorlds.contains(w);
+    }
+
+    public DimensionSettings dimension(Dimension d) {
+        return dimensions.get(d);
+    }
+
+    public List<ResourceRule> rulesFor(Dimension d) {
+        return rulesByDim.get(d);
+    }
+
+    public Set<Material> blocksFor(Dimension d) {
+        return blocksByDim.get(d);
+    }
+
+    /** Režim CHUNK platí v dimenzi jen když má nějaká pravidla surovin (jinak pevné tiery). */
+    public boolean chunkModeFor(Dimension d) {
+        return chunkMode && !rulesByDim.get(d).isEmpty();
+    }
+
+    private static DimensionSettings readDimension(FileConfiguration cfg, Dimension d, String defWorld,
+                                                   String defSource, int defRadius, int defRange) {
+        String p = "dimensions." + d.id() + ".";
+        String seedRaw = cfg.getString(p + "seed", "").trim();
+        Long seed = null;
+        if (!seedRaw.isEmpty()) {
+            try {
+                seed = Long.parseLong(seedRaw);
+            } catch (NumberFormatException ex) {
+                seed = (long) seedRaw.hashCode();
+            }
+        }
+        return new DimensionSettings(cfg.getBoolean(p + "enabled", true),
+                cfg.getString(p + "world", defWorld),
+                cfg.getString(p + "source-world", defSource),
+                seed,
+                Math.max(1, cfg.getInt(p + "max-radius", defRadius)),
+                Math.max(100, cfg.getInt(p + "start-range-chunks", defRange)));
     }
 
     /** Odemykací tier podle počtu už odemčených chunků. */
@@ -390,16 +459,16 @@ public final class Settings {
     }
 
     /** Načte unlock.chunk.resources. Neznámé bloky (jiná verze serveru) se tiše přeskočí. */
-    private static List<ResourceRule> readResources(FileConfiguration cfg, Logger log) {
+    private static List<ResourceRule> readResources(FileConfiguration cfg, String path, Logger log) {
         List<ResourceRule> out = new ArrayList<>();
-        for (Map<?, ?> map : cfg.getMapList("unlock.chunk.resources")) {
+        for (Map<?, ?> map : cfg.getMapList(path)) {
             String id = String.valueOf(map.get("id"));
             boolean self = Boolean.parseBoolean(String.valueOf(map.get("self")));
             Material drop = null;
             if (!self) {
                 drop = Material.matchMaterial(String.valueOf(map.get("drop")));
                 if (drop == null || drop.isAir() || !drop.isItem()) {
-                    log.warning("Neplatný drop v unlock.chunk.resources (" + id + "): " + map.get("drop"));
+                    log.warning("Neplatný drop v " + path + " (" + id + "): " + map.get("drop"));
                     continue;
                 }
             }
@@ -411,7 +480,7 @@ public final class Settings {
                 }
             }
             if (blocks.isEmpty()) {
-                log.warning("unlock.chunk.resources (" + id + "): žádný platný blok, přeskakuji.");
+                log.warning(path + " (" + id + "): žádný platný blok, přeskakuji.");
                 continue;
             }
             double perBlock = Math.max(0.01, toDouble(map.get("per-block"), 1));

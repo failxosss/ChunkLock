@@ -36,11 +36,14 @@ public final class PlayerListener implements Listener {
             own.setOwnerName(player.getName());
             plugin.storage().saveIsland(own);
         }
-        for (Island island : plugin.islands().all()) {
-            Island.Member member = island.members().get(player.getUniqueId());
-            if (member != null && !member.name().equals(player.getName())) {
-                member.setName(player.getName());
-                plugin.storage().saveIsland(island);
+        for (dev.chunklock.manager.IslandManager m : plugin.allIslandManagers()) {
+            for (Island island : m.all()) {
+                if (island.parent() != null) continue; // členy sdílí s hlavním ostrovem
+                Island.Member member = island.members().get(player.getUniqueId());
+                if (member != null && !member.name().equals(player.getName())) {
+                    member.setName(player.getName());
+                    plugin.storage().saveIsland(island);
+                }
             }
         }
 
@@ -48,8 +51,8 @@ public final class PlayerListener implements Listener {
         if (plugin.islands().applyPendingDelete(player)) return;
 
         // hráč se odhlásil v chunk světě na ostrově, kam už nepatří
-        if (plugin.islands().isChunkWorld(player.getWorld())) {
-            Plot plot = plugin.islands().plotAt(player.getLocation());
+        if (plugin.isChunkWorld(player.getWorld())) {
+            Plot plot = plugin.plotAt(player.getLocation());
             boolean ok = plot != null
                     && plot.island().isUnlocked(plot.rel())
                     && plot.island().isMember(player.getUniqueId());
@@ -62,7 +65,7 @@ public final class PlayerListener implements Listener {
     @EventHandler
     public void onDeath(PlayerDeathEvent e) {
         Player player = e.getEntity();
-        if (plugin.islands().isChunkWorld(player.getWorld())) {
+        if (plugin.isChunkWorld(player.getWorld())) {
             diedInChunkWorld.add(player.getUniqueId());
         }
     }

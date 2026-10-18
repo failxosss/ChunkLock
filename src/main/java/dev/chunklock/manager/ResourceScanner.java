@@ -2,6 +2,7 @@ package dev.chunklock.manager;
 
 import dev.chunklock.ChunkLockPlugin;
 import dev.chunklock.model.ChunkPos;
+import dev.chunklock.model.Dimension;
 import dev.chunklock.model.Island;
 import org.bukkit.Chunk;
 import org.bukkit.ChunkSnapshot;
@@ -26,8 +27,8 @@ public final class ResourceScanner {
     }
 
     /** Spočítá relevantní bloky (podle unlock.chunk.resources) v chunku, jak vypadá právě teď. */
-    public Map<Material, Integer> scan(Chunk chunk) {
-        Set<Material> wanted = plugin.settings().resourceBlocks;
+    public Map<Material, Integer> scan(Chunk chunk, Dimension dim) {
+        Set<Material> wanted = plugin.settings().blocksFor(dim);
         Map<Material, Integer> out = new EnumMap<>(Material.class);
         if (wanted.isEmpty()) return out;
 
@@ -49,9 +50,9 @@ public final class ResourceScanner {
 
     /** Naskenuje (odemčený) chunk ostrova a výsledek uloží k ostrovu. */
     public Map<Material, Integer> record(Island island, ChunkPos rel) {
-        IslandManager im = plugin.islands();
+        IslandManager im = plugin.islandsFor(island);
         Chunk chunk = im.world().getChunkAt(im.centerChunkX(island) + rel.x(), im.centerChunkZ(island) + rel.z());
-        Map<Material, Integer> counts = scan(chunk);
+        Map<Material, Integer> counts = scan(chunk, island.dimension());
         island.setResources(rel, counts);
         return counts;
     }

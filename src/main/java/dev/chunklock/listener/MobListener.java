@@ -29,8 +29,8 @@ public final class MobListener implements Listener {
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onSpawn(CreatureSpawnEvent e) {
         if (!BLOCKED.contains(e.getSpawnReason())) return;
-        if (!plugin.islands().isChunkWorld(e.getLocation().getWorld())) return;
-        Plot plot = plugin.islands().plotAt(e.getLocation());
+        if (!plugin.isChunkWorld(e.getLocation().getWorld())) return;
+        Plot plot = plugin.plotAt(e.getLocation());
         if (plot != null && !plot.island().mobSpawning()) e.setCancelled(true);
     }
 }

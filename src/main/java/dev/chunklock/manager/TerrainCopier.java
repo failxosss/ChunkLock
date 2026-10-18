@@ -2,6 +2,7 @@ package dev.chunklock.manager;
 
 import dev.chunklock.ChunkLockPlugin;
 import dev.chunklock.config.Settings;
+import dev.chunklock.model.Dimension;
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
 import org.bukkit.ChunkSnapshot;
@@ -28,30 +29,33 @@ import java.util.logging.Level;
 public final class TerrainCopier {
 
     private final ChunkLockPlugin plugin;
+    private final Dimension dimension;
     private World source;
 
-    public TerrainCopier(ChunkLockPlugin plugin) {
+    public TerrainCopier(ChunkLockPlugin plugin, Dimension dimension) {
         this.plugin = plugin;
+        this.dimension = dimension;
     }
 
     /** Načte nebo vytvoří zdrojový svět. @return false při chybě */
     public boolean init() {
         Settings s = plugin.settings();
-        if (s.sourceWorldName.equalsIgnoreCase(s.worldName)) {
-            plugin.getLogger().severe("generation.world.name nesmí být stejný jako chunk-world.name.");
+        Settings.DimensionSettings ds = s.dimension(dimension);
+        if (ds.sourceWorld().equalsIgnoreCase(ds.world())) {
+            plugin.getLogger().severe("Zdrojový svět (" + dimension.id() + ") nesmí být stejný jako svět s ostrovy.");
             return false;
         }
-        World w = Bukkit.getWorld(s.sourceWorldName);
+        World w = Bukkit.getWorld(ds.sourceWorld());
         if (w == null) {
-            WorldCreator wc = new WorldCreator(s.sourceWorldName)
-                    .environment(World.Environment.NORMAL)
+            WorldCreator wc = new WorldCreator(ds.sourceWorld())
+                    .environment(dimension.environment())
                     .type(WorldType.NORMAL)
                     .generateStructures(s.sourceStructures);
-            if (s.sourceSeed != null) wc.seed(s.sourceSeed);
+            if (ds.seed() != null) wc.seed(ds.seed());
             w = wc.createWorld();
         }
         if (w == null) {
-            plugin.getLogger().severe("Nepodařilo se vytvořit zdrojový svět '" + s.sourceWorldName + "'.");
+            plugin.getLogger().severe("Nepodařilo se vytvořit zdrojový svět '" + ds.sourceWorld() + "'.");
             return false;
         }
         w.setAutoSave(false); // zdrojový svět nemá zbytečně zabírat místo na disku
@@ -73,8 +77,9 @@ public final class TerrainCopier {
     private void tryStart(int attempt, Consumer<int[]> callback) {
         Settings s = plugin.settings();
         ThreadLocalRandom rnd = ThreadLocalRandom.current();
-        int cx = rnd.nextInt(-s.startRange, s.startRange + 1);
-        int cz = rnd.nextInt(-s.startRange, s.startRange + 1);
+        int range = s.dimension(dimension).startRange();
+        int cx = rnd.nextInt(-range, range + 1);
+        int cz = rnd.nextInt(-range, range + 1);
         if (attempt >= s.startAttempts) {
             callback.accept(new int[]{cx, cz}); // nic vhodného - vezmeme, co máme
             return;
@@ -91,7 +96,29 @@ public final class TerrainCopier {
                 }));
     }
 
+    /**
+     * Najde místo k stání (y nohou) ve sloupci x,z: pevný blok a nad ním dva volné bloky. Hledá se odshora dolů
+     * od topY; vrací Integer.MIN_VALUE, když nic takového není. Slouží pro Nether (strop z bedrocku, láva dole).
+     */
+    public static int findFloorY(World w, int x, int z, int topY, int bottomY) {
+        for (int y = topY; y >= bottomY; y--) {
+            Block below = w.getBlockAt(x, y - 1, z);
+            if (!below.getType().isSolid() || below.getType() == Material.BEDROCK) continue;
+            if (w.getBlockAt(x, y, z).isPassable() && !w.getBlockAt(x, y, z).isLiquid()
+                    && w.getBlockAt(x, y + 1, z).isPassable() && !w.getBlockAt(x, y + 1, z).isLiquid()) {
+                return y;
+            }
+        }
+        return Integer.MIN_VALUE;
+    }
+
     private boolean suitable(Chunk chunk) {
+        if (dimension == Dimension.NETHER) {
+            int x = (chunk.getX() << 4) + 8;
+            int z = (chunk.getZ() << 4) + 8;
+            int y = findFloorY(chunk.getWorld(), x, z, 110, 36);
+            return y != Integer.MIN_VALUE;
+        }
         World w = chunk.getWorld();
         int x = (chunk.getX() << 4) + 8;
         int z = (chunk.getZ() << 4) + 8;

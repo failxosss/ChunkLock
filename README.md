@@ -131,3 +131,13 @@ na 9; při nule svitek zmizí. Počet nábojů je uložený v itemu a vypisuje s
 
 Svitek jde omezit na majitele a členy s oprávněním `unlock`: v `config.yml` nastav `unlock-token.require-permission: true`
 (výchozí `false` = smí ho použít každý člen ostrova).
+
+## Nether a End
+Stejný chunk systém funguje i v Netheru a Endu (`dimensions:` v `config.yml`).
+
+- **Nether:** když v chunk světě (nebo ve světě z `dimensions.extra-portal-worlds`) projdeš Nether portálem, dostaneš vlastní chunk v Netheru zkopírovaný ze zdrojového Netheru. Odemyká se věcmi, které v sousedním chunku opravdu najdeš (`unlock.chunk.resources-nether`: netherrack, křemen, zlaté nugety, ancient debris, soul sand, bazalt, glowstone, stonky...). Portál v Netheru vede zpět na ostrov v overworldu.
+- **End:** vstup do End portálu (postaveného z rámů a očí) tě přenese na jeden chunk s výstupním portálem a spawne se Ender drak. Drak má boss bar, nerozbíjí bloky a když odletí dál než `dimensions.end.dragon.leash-radius`, vrátí se. Po zabití draka výstupní portál a vejce zůstanou a odemykání dalších chunků (`resources-end`) pokračuje. Portál v Endu vede domů.
+- Členové, oprávnění a mobs se sdílejí s hlavním ostrovem v overworldu; reset nebo smazání hlavního ostrova smaže i jeho Nether a End část (se zálohou).
+- `/chunk admin tp <hráč> [overworld|nether|end]` teleportuje do dané dimenze.
+
+**Upozornění:** první start vytvoří dva další zdrojové světy (je to náročné). Let draka s vlastním podiem nebyl na reálném serveru ověřen; kdyby se choval divně, nastav `dimensions.end.dragon.enabled: false` nebo zmenši `leash-radius`. `max-radius` v Endu drž malý, mimo hlavní ostrov je End prázdný.

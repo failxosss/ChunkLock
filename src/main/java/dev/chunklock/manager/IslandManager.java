@@ -4,6 +4,7 @@ import dev.chunklock.ChunkLockPlugin;
 import dev.chunklock.config.Messages;
 import dev.chunklock.config.Settings;
 import dev.chunklock.model.ChunkPos;
+import dev.chunklock.model.Dimension;
 import dev.chunklock.model.Island;
 import dev.chunklock.util.VoidGenerator;
 import org.bukkit.Bukkit;
@@ -40,6 +41,7 @@ public final class IslandManager {
     public static final int[][] DIRS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
 
     private final ChunkLockPlugin plugin;
+    private final Dimension dim;
     private final Map<UUID, Island> islands = new HashMap<>();
     private final Map<Long, Island> bySlot = new HashMap<>();
     private final Map<UUID, UUID> active = new HashMap<>();
@@ -57,8 +59,13 @@ public final class IslandManager {
     private final Map<UUID, Integer> generating = new HashMap<>();
     private final Map<UUID, List<Runnable>> waiting = new HashMap<>();
 
-    public IslandManager(ChunkLockPlugin plugin) {
+    public IslandManager(ChunkLockPlugin plugin, Dimension dim) {
         this.plugin = plugin;
+        this.dim = dim;
+    }
+
+    public Dimension dimension() {
+        return dim;
     }
 
     // ---------------------------------------------------------------- init
@@ -67,13 +74,24 @@ public final class IslandManager {
     public boolean init() {
         Settings s = plugin.settings();
         // vzdálenost ostrovů v chuncích: min. rozměr ostrova + mezera, nebo distance-blocks (např. 2000 bloků)
-        int configured = Math.max(2 * s.maxRadius + 1 + s.gap, (int) Math.ceil(s.distanceBlocks / 16.0));
-        Storage.State state = plugin.storage().loadState(configured);
+        int configured = Math.max(2 * s.dimension(dim).maxRadius() + 1 + s.gap, (int) Math.ceil(s.distanceBlocks / 16.0));
+        Storage.State state = plugin.storage().loadState(dim, configured);
         nextSlot = state.nextSlot();
+        // End: slot 0 je ve středu světa, kde běží vanilla souboj s drakem - ostrovy hráčů začínají mimo něj
+        if (dim == Dimension.END && nextSlot < 1) nextSlot = 1;
         active.putAll(state.active());
-        pendingDelete.addAll(plugin.storage().loadPendingDelete());
+        if (dim == Dimension.OVERWORLD) pendingDelete.addAll(plugin.storage().loadPendingDelete());
 
-        for (Island island : plugin.storage().loadIslands()) {
+        for (Island island : plugin.storage().loadIslands(dim)) {
+            if (dim != Dimension.OVERWORLD) { // ostrov v Netheru / Endu patří k ostrovu v overworldu (sdílí členy)
+                Island parent = plugin.islands().byOwner(island.owner());
+                if (parent == null) {
+                    plugin.getLogger().warning("Ostrov " + island.ownerName() + " (" + dim.id()
+                            + ") nemá ostrov v overworldu, přeskakuji.");
+                    continue;
+                }
+                island.setParent(parent);
+            }
             islands.put(island.owner(), island);
             bySlot.put(slotKey(island.gridX(), island.gridZ()), island);
         }
@@ -81,12 +99,13 @@ public final class IslandManager {
         spacing = islands.isEmpty() ? Math.max(4, configured) : Math.max(4, state.spacing());
         saveState();
         if (!resolveWorld()) return false;
-        if (s.worldGeneration) {
-            TerrainCopier copier = new TerrainCopier(plugin);
+        if (dim != Dimension.OVERWORLD || s.worldGeneration) {
+            TerrainCopier copier = new TerrainCopier(plugin, dim);
             if (copier.init()) {
                 terrain = copier;
             } else {
-                plugin.getLogger().warning("Generování z normálního světa se nepodařilo zapnout - používám plochý ostrov.");
+                plugin.getLogger().warning("Generování z normálního světa (" + dim.id()
+                        + ") se nepodařilo zapnout - používám plochý ostrov.");
             }
         }
         return true;
@@ -99,6 +118,7 @@ public final class IslandManager {
 
     /** Pod jakou výškou se hráč vrací zpět na ostrov (u ostrovů z normálního světa je to pod spodkem světa). */
     public int rescueY(Location loc) {
+        if (dim != Dimension.OVERWORLD) return world.getMinHeight() - 8; // Nether / End: pod spodkem světa
         Plot plot = plotAt(loc);
         if (plot != null && plot.island().hasSource()) return plugin.settings().voidRescueY;
         // ploché ostrovy: kousek pod spodkem chunku
@@ -119,17 +139,18 @@ public final class IslandManager {
 
     private boolean resolveWorld() {
         Settings s = plugin.settings();
-        World w = Bukkit.getWorld(s.worldName);
-        if (w == null && s.createWorld) {
-            w = new WorldCreator(s.worldName)
+        String name = s.dimension(dim).world();
+        World w = Bukkit.getWorld(name);
+        if (w == null && (s.createWorld || dim != Dimension.OVERWORLD)) {
+            w = new WorldCreator(name)
                     .generator(new VoidGenerator())
-                    .environment(World.Environment.NORMAL)
+                    .environment(dim.environment())
                     .type(WorldType.NORMAL)
                     .generateStructures(false)
                     .createWorld();
         }
         if (w == null) {
-            plugin.getLogger().severe("Svět '" + s.worldName + "' neexistuje a create-if-missing je vypnuté.");
+            plugin.getLogger().severe("Svět '" + name + "' neexistuje a create-if-missing je vypnuté.");
             return false;
         }
         world = w;
@@ -149,7 +170,7 @@ public final class IslandManager {
     }
 
     public void saveState() {
-        plugin.storage().saveState(nextSlot, spacing, active);
+        plugin.storage().saveState(dim, nextSlot, spacing, active);
     }
 
     public void saveAll() {
@@ -196,7 +217,7 @@ public final class IslandManager {
     }
 
     public int radius() {
-        return Math.max(1, Math.min(plugin.settings().maxRadius, (spacing - 2) / 2));
+        return Math.max(1, Math.min(plugin.settings().dimension(dim).maxRadius(), (spacing - 2) / 2));
     }
 
     public int maxChunks() {
@@ -228,12 +249,36 @@ public final class IslandManager {
     public Location spawnLocation(Island is) {
         double x = (centerChunkX(is) << 4) + 8.5;
         double z = (centerChunkZ(is) << 4) + 8.5;
+        if (dim == Dimension.NETHER) return netherSpawn(is, x, z);
+        if (dim == Dimension.END) { // kousek od výstupního portálu uprostřed chunku
+            double ez = z + 6;
+            return new Location(world, x, world.getHighestBlockYAt((int) Math.floor(x), (int) Math.floor(ez),
+                    HeightMap.MOTION_BLOCKING_NO_LEAVES) + 1, ez);
+        }
         double y = plugin.settings().surfaceY + 1;
         if (is.hasSource()) {
             y = world.getHighestBlockYAt((int) Math.floor(x), (int) Math.floor(z),
                     HeightMap.MOTION_BLOCKING_NO_LEAVES) + 1;
         }
         return new Location(world, x, y, z);
+    }
+
+    /** Nether: první místo k stání poblíž středu startovního chunku (nahoře je strop z bedrocku, dole láva). */
+    private Location netherSpawn(Island is, double x, double z) {
+        int top = is.hasRefY() ? Math.min(120, is.refY() + 24) : 118;
+        int bottom = is.hasRefY() ? Math.max(1, is.refY() - 24) : 34;
+        for (int r = 0; r <= 6; r += 2) {
+            for (int dx = -r; dx <= r; dx += 2) {
+                for (int dz = -r; dz <= r; dz += 2) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != r) continue;
+                    int bx = (int) Math.floor(x) + dx;
+                    int bz = (int) Math.floor(z) + dz;
+                    int y = TerrainCopier.findFloorY(world, bx, bz, top, bottom);
+                    if (y != Integer.MIN_VALUE) return new Location(world, bx + 0.5, y, bz + 0.5);
+                }
+            }
+        }
+        return new Location(world, x, is.hasRefY() ? is.refY() : 64, z);
     }
 
     /** Spirála od středu: 0 -> (0,0), pak prstenec 1, prstenec 2 ... */
@@ -285,13 +330,13 @@ public final class IslandManager {
         is.unlock(rel);
         is.clearProgress(rel);
         is.clearRequired(rel);
-        plugin.panels().suspend(is.owner()); // cedulky vzniknou až po dokončení chunku (výška terénu)
+        plugin.panels().suspend(is); // cedulky vzniknou až po dokončení chunku (výška terénu)
         beginGeneration(is);
         Runnable finish = () -> {
             scanResources(is, rel); // musí být hotové dřív, než vzniknou cedulky sousedních chunků
             endGeneration(is);
             plugin.storage().saveIsland(is);
-            plugin.panels().resume(is.owner());
+            plugin.panels().resume(is);
             plugin.panels().spawn(is);
         };
         try {
@@ -333,8 +378,17 @@ public final class IslandManager {
     // ---------------------------------------------------------------- vytvoření
 
     public Island createIsland(Player owner) {
+        return createIslandInternal(null, owner.getUniqueId(), owner.getName());
+    }
+
+    /** Nether / End ostrov hráče, který už má ostrov v overworldu (sdílí s ním členy). */
+    public Island createChild(Island parent) {
+        return createIslandInternal(parent, parent.owner(), parent.ownerName());
+    }
+
+    private Island createIslandInternal(Island parent, UUID ownerId, String ownerName) {
         int[] s = slot(nextSlot++);
-        Island is = new Island(owner.getUniqueId(), owner.getName(), s[0], s[1]);
+        Island is = new Island(dim, parent, ownerId, ownerName, s[0], s[1]);
         islands.put(is.owner(), is);
         bySlot.put(slotKey(is.gridX(), is.gridZ()), is);
         is.unlock(new ChunkPos(0, 0));
@@ -363,17 +417,65 @@ public final class IslandManager {
         boolean useWorld = terrain != null && (start || is.hasSource());
         if (!useWorld) {
             if (start) is.clearSource();
-            generateFlat(is, rel, start);
+            if (dim == Dimension.OVERWORLD) generateFlat(is, rel, start);
+            else generateSimplePlatform(is, rel);
+            if (start) onStartGenerated(is);
             if (done != null) done.run();
             return;
         }
         if (start) {
+            Runnable afterStart = () -> {
+                onStartGenerated(is);
+                if (done != null) done.run();
+            };
+            if (dim == Dimension.END) { // hlavní ostrov Endu: střed zdrojového světa
+                is.setSource(0, 0);
+                copyFromSource(is, rel, afterStart);
+                return;
+            }
             terrain.findStart(origin -> {
                 is.setSource(origin[0], origin[1]);
-                copyFromSource(is, rel, done);
+                copyFromSource(is, rel, afterStart);
             });
         } else {
             copyFromSource(is, rel, done);
+        }
+    }
+
+    /** Po vygenerování startovního chunku: Nether zjistí podlahu, End postaví podium s portálem. */
+    private void onStartGenerated(Island is) {
+        try {
+            if (dim == Dimension.NETHER) {
+                int bx = (centerChunkX(is) << 4) + 8;
+                int bz = (centerChunkZ(is) << 4) + 8;
+                int y = TerrainCopier.findFloorY(world, bx, bz, 120, 1);
+                if (y == Integer.MIN_VALUE) { // ani po kopírování není kam stoupnout - uděláme malou plošinu
+                    y = 64;
+                    for (int dx = -2; dx <= 2; dx++) {
+                        for (int dz = -2; dz <= 2; dz++) {
+                            world.getBlockAt(bx + dx, y - 1, bz + dz).setType(Material.NETHERRACK, false);
+                            world.getBlockAt(bx + dx, y, bz + dz).setType(Material.AIR, false);
+                            world.getBlockAt(bx + dx, y + 1, bz + dz).setType(Material.AIR, false);
+                        }
+                    }
+                }
+                is.setRefY(y);
+            } else if (dim == Dimension.END) {
+                plugin.end().buildPodium(is);
+            }
+        } catch (RuntimeException ex) {
+            plugin.getLogger().log(java.util.logging.Level.WARNING, "Dokončení startovního chunku selhalo", ex);
+        }
+    }
+
+    /** Záloha, když se nepodaří zapnout kopírování terénu: jednoduchá plošina (Nether: netherrack, End: end stone). */
+    private void generateSimplePlatform(Island is, ChunkPos rel) {
+        Chunk chunk = world.getChunkAt(centerChunkX(is) + rel.x(), centerChunkZ(is) + rel.z());
+        Material m = dim == Dimension.NETHER ? Material.NETHERRACK : Material.END_STONE;
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+                for (int y = 58; y <= 63; y++) chunk.getBlock(x, y, z).setType(m, false);
+            }
         }
     }
 
@@ -608,7 +710,8 @@ public final class IslandManager {
     /** initiator může být null (admin reset cizího ostrova, majitel offline). */
     public void resetIsland(Island island, Player initiator) {
         plugin.storage().backupIsland(island, "reset");
-        plugin.panels().suspend(island.owner()); // během resetu se žádné cedulky nesmí objevit
+        plugin.removeRealmIslands(island.owner(), "reset"); // Nether a End ostrov se zahodí, vzniknou znovu přes portál
+        plugin.panels().suspend(island); // během resetu se žádné cedulky nesmí objevit
         for (Player p : playersInside(island)) sendToReset(p);
         Bukkit.getScheduler().runTaskLater(plugin, () -> clearIsland(island, () -> {
             island.reset();
@@ -619,7 +722,7 @@ public final class IslandManager {
                 try {
                     plugin.storage().saveIsland(island);
                 } finally {
-                    plugin.panels().resume(island.owner());
+                    plugin.panels().resume(island);
                 }
                 if (initiator != null && initiator.isOnline()) {
                     plugin.messages().send(initiator, "reset.done");
@@ -639,6 +742,7 @@ public final class IslandManager {
 
     public void deleteIsland(Island island) {
         plugin.storage().backupIsland(island, "delete");
+        plugin.removeRealmIslands(island.owner(), "delete");
         // hráči stojící na ostrově + majitel (ať je kdekoliv) se teleportují na delete.location
         Set<UUID> targets = new LinkedHashSet<>();
         for (Player p : playersInside(island)) targets.add(p.getUniqueId());
@@ -654,23 +758,28 @@ public final class IslandManager {
             }
         }
         if (pendingChanged) plugin.storage().savePendingDelete(pendingDelete);
-        plugin.panels().remove(island.owner());
+        plugin.panels().remove(island);
         islands.remove(island.owner());
         bySlot.remove(slotKey(island.gridX(), island.gridZ()));
         active.values().removeIf(owner -> owner.equals(island.owner()));
-        plugin.storage().deleteIsland(island.owner());
+        plugin.storage().deleteIsland(dim, island.owner());
         saveState();
         clearing.add(island.owner());
         Bukkit.getScheduler().runTaskLater(plugin, () -> clearIsland(island, () -> clearing.remove(island.owner())), 20L);
     }
 
-    public enum RestoreResult { OK, HAS_ISLAND, SLOT_TAKEN, CLEARING }
+    public enum RestoreResult { OK, HAS_ISLAND, SLOT_TAKEN, CLEARING, NO_PARENT }
 
     /**
      * Obnoví ostrov ze zálohy: vrátí data (odemčené chunky, postup, členy, příspěvky) a znovu vygeneruje
      * terén všech odemčených chunků (ze stejného místa zdrojového světa). Co hráči postavili, se neobnoví.
      */
     public RestoreResult restoreIsland(Island restored) {
+        if (dim != Dimension.OVERWORLD) { // ostrov v Netheru / Endu jde obnovit jen k existujícímu ostrovu v overworldu
+            Island parent = plugin.islands().byOwner(restored.owner());
+            if (parent == null) return RestoreResult.NO_PARENT;
+            restored.setParent(parent);
+        }
         if (islands.containsKey(restored.owner())) return RestoreResult.HAS_ISLAND;
         if (clearing.contains(restored.owner())) return RestoreResult.CLEARING;
         if (bySlot.containsKey(slotKey(restored.gridX(), restored.gridZ()))) return RestoreResult.SLOT_TAKEN;
@@ -685,12 +794,13 @@ public final class IslandManager {
         for (long key : restored.unlockedKeys()) chunks.add(ChunkPos.fromKey(key));
         chunks.sort(java.util.Comparator.comparingInt(ChunkPos::distance));
 
-        plugin.panels().suspend(restored.owner());
+        plugin.panels().suspend(restored);
         beginGeneration(restored);
         regenerate(restored, chunks, 0, () -> {
+            if (dim == Dimension.END) plugin.end().buildPodium(restored);
             endGeneration(restored);
             plugin.storage().saveIsland(restored);
-            plugin.panels().resume(restored.owner());
+            plugin.panels().resume(restored);
             plugin.panels().spawn(restored);
         });
         return RestoreResult.OK;
@@ -709,6 +819,23 @@ public final class IslandManager {
             plugin.getLogger().log(java.util.logging.Level.WARNING, "Obnova chunku selhala", ex);
             next.run();
         }
+    }
+
+    /**
+     * Smaže ostrov v Netheru / Endu (volá se při resetu nebo smazání ostrova v overworldu): záloha, hráči uvnitř
+     * se pošlou pryč, bloky se uklidí.
+     */
+    public void removeSilently(Island island, String reason) {
+        plugin.storage().backupIsland(island, reason);
+        for (Player p : playersInside(island)) sendTo(p, reason.equals("delete") ? "delete" : "reset");
+        plugin.end().cleanup(island);
+        plugin.panels().remove(island);
+        islands.remove(island.owner());
+        bySlot.remove(slotKey(island.gridX(), island.gridZ()));
+        plugin.storage().deleteIsland(dim, island.owner());
+        saveState();
+        clearing.add(island.owner());
+        Bukkit.getScheduler().runTaskLater(plugin, () -> clearIsland(island, () -> clearing.remove(island.owner())), 20L);
     }
 
     /** Vymaže bloky odemčených chunků, jeden chunk za tick. */

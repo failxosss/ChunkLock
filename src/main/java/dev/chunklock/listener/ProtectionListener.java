@@ -62,10 +62,10 @@ public final class ProtectionListener implements Listener {
     }
 
     private boolean allowed(Player player, Location loc, IslandPermission permission, boolean notify) {
-        if (!plugin.islands().isChunkWorld(loc.getWorld())) return true;
+        if (!plugin.isChunkWorld(loc.getWorld())) return true;
         if (player.hasPermission(BYPASS)) return true;
 
-        Plot plot = plugin.islands().plotAt(loc);
+        Plot plot = plugin.plotAt(loc);
         if (plot == null || !plot.island().isUnlocked(plot.rel())) {
             if (notify) deny(player, "protection.locked");
             return false;
@@ -80,8 +80,8 @@ public final class ProtectionListener implements Listener {
     /** Je na dané pozici zamčený chunk (nebo mimo ostrov) v chunk světě? */
     private boolean lockedAt(Location loc) {
         if (loc == null || loc.getWorld() == null) return false;
-        if (!plugin.islands().isChunkWorld(loc.getWorld())) return false;
-        Plot plot = plugin.islands().plotAt(loc);
+        if (!plugin.isChunkWorld(loc.getWorld())) return false;
+        Plot plot = plugin.plotAt(loc);
         return plot == null || !plot.island().isUnlocked(plot.rel());
     }
 
@@ -178,7 +178,7 @@ public final class ProtectionListener implements Listener {
         if (damager == null) return;
 
         Entity victim = e.getEntity();
-        if (!plugin.islands().isChunkWorld(victim.getWorld())) return;
+        if (!plugin.isChunkWorld(victim.getWorld())) return;
         if (victim instanceof Interaction) return;
 
         if (victim instanceof Player) {
@@ -232,16 +232,16 @@ public final class ProtectionListener implements Listener {
     public void onFluidFlow(BlockFromToEvent e) {
         Block from = e.getBlock();
         Block to = e.getToBlock();
-        if (!plugin.islands().isChunkWorld(from.getWorld())) return;
+        if (!plugin.isChunkWorld(from.getWorld())) return;
 
-        Plot target = plugin.islands().plotAt(to.getLocation());
+        Plot target = plugin.plotAt(to.getLocation());
         if (target == null || !target.island().isUnlocked(target.rel())) {
             e.setCancelled(true);
             return;
         }
         // tok mezi dvěma různými ostrovy zakázat
         if ((from.getX() >> 4) != (to.getX() >> 4) || (from.getZ() >> 4) != (to.getZ() >> 4)) {
-            Plot source = plugin.islands().plotAt(from.getLocation());
+            Plot source = plugin.plotAt(from.getLocation());
             if (source == null || source.island() != target.island()) e.setCancelled(true);
         }
     }
@@ -250,7 +250,7 @@ public final class ProtectionListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onDispense(BlockDispenseEvent e) {
         Block b = e.getBlock();
-        if (!plugin.islands().isChunkWorld(b.getWorld())) return;
+        if (!plugin.isChunkWorld(b.getWorld())) return;
         if (lockedAt(b)) {
             e.setCancelled(true);
             return;
@@ -262,7 +262,7 @@ public final class ProtectionListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onPistonExtend(BlockPistonExtendEvent e) {
-        if (!plugin.islands().isChunkWorld(e.getBlock().getWorld())) return;
+        if (!plugin.isChunkWorld(e.getBlock().getWorld())) return;
         BlockFace dir = e.getDirection();
         if (lockedAt(e.getBlock().getRelative(dir))) {
             e.setCancelled(true);
@@ -278,7 +278,7 @@ public final class ProtectionListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onPistonRetract(BlockPistonRetractEvent e) {
-        if (!plugin.islands().isChunkWorld(e.getBlock().getWorld())) return;
+        if (!plugin.isChunkWorld(e.getBlock().getWorld())) return;
         BlockFace dir = e.getDirection();
         for (Block moved : e.getBlocks()) {
             if (lockedAt(moved) || lockedAt(moved.getRelative(dir))) {
@@ -306,7 +306,7 @@ public final class ProtectionListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onStructureGrow(StructureGrowEvent e) {
-        if (!plugin.islands().isChunkWorld(e.getWorld())) return;
+        if (!plugin.isChunkWorld(e.getWorld())) return;
         if (lockedAt(e.getLocation())) {
             e.setCancelled(true);
             return;
@@ -317,6 +317,10 @@ public final class ProtectionListener implements Listener {
     /** Padající bloky, endermani, atd. nesmí měnit bloky v zamčeném chunku. */
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onEntityChangeBlock(EntityChangeBlockEvent e) {
+        if (e.getEntity() instanceof org.bukkit.entity.EnderDragon && plugin.isChunkWorld(e.getBlock().getWorld())) {
+            e.setCancelled(true); // drak neničí ostrov
+            return;
+        }
         if (lockedAt(e.getBlock())) e.setCancelled(true);
     }
 
@@ -324,7 +328,11 @@ public final class ProtectionListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onEntityExplode(EntityExplodeEvent e) {
-        if (!plugin.islands().isChunkWorld(e.getLocation().getWorld())) return;
+        if (!plugin.isChunkWorld(e.getLocation().getWorld())) return;
+        if (e.getEntity() instanceof org.bukkit.entity.EnderDragon) {
+            e.blockList().clear(); // drak neničí ostrov
+            return;
+        }
         if (!plugin.settings().explosions) {
             e.blockList().clear();
         } else {
@@ -334,7 +342,7 @@ public final class ProtectionListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onBlockExplode(BlockExplodeEvent e) {
-        if (!plugin.islands().isChunkWorld(e.getBlock().getWorld())) return;
+        if (!plugin.isChunkWorld(e.getBlock().getWorld())) return;
         if (!plugin.settings().explosions) {
             e.blockList().clear();
         } else {

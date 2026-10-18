@@ -125,6 +125,7 @@ admin:
   restore-has-island: "<prefix><red>Hráč <yellow><player> <red>už má chunk. Nejdřív ho smaž: <white>/chunk admin delete <player>"
   restore-slot-taken: "<prefix><red>Místo ve světě, kde ostrov stál, už je obsazené."
   restore-clearing: "<prefix><red>Smazaný ostrov se ještě uklízí, zkus to za chvíli."
+  restore-no-parent: "<prefix><red>Hráč <yellow><player> <red>nemá hlavní ostrov v overworldu - nejdřív obnov ten."
   restore-started: "<prefix><green>Obnovuji chunk hráče <yellow><player> <gray>(<chunks> chunků)<green>. Stavby hráče se neobnovují, jen terén a postup."
 
 mobs:
@@ -249,3 +250,13 @@ top:
   header: "<prefix><gold>Nejrozsáhlejší chunky:"
   entry: "<gray>#<pos> <yellow><player> <dark_gray>- <green><unlocked> <gray>chunků"
   own: "<gray>Ty jsi <yellow>#<pos> <dark_gray>- <green><unlocked> <gray>chunků"
+
+portal:
+  disabled: "<prefix><red>Tahle dimenze je na serveru vypnutá."
+  created-nether: "<prefix><red>Procházíš portálem... <gray>V Netheru ti vznikl vlastní chunk."
+  created-end: "<prefix><light_purple>Procházíš portálem... <gray>V Endu ti vznikl vlastní chunk. Drak už tě čeká!"
+  arrived: "<prefix><gray>Jsi v dimenzi <yellow><dimension> <gray>(chunk hráče <yellow><owner><gray>)."
+
+end:
+  dragon-title: "<light_purple>Ender drak"
+  dragon-killed: "<prefix><light_purple>Ender drak je poražen! <gray>Výstupní portál je aktivní, odemykání dalších chunků pokračuje."

@@ -33,8 +33,9 @@ public final class MovementListener implements Listener {
     public void onMove(PlayerMoveEvent e) {
         Location from = e.getFrom();
         Location to = e.getTo();
-        IslandManager im = plugin.islands();
-        if (to == null || !im.isChunkWorld(to.getWorld())) return;
+        if (to == null) return;
+        IslandManager im = plugin.islandsAt(to.getWorld());
+        if (im == null) return;
 
         Player player = e.getPlayer();
         if (player.hasPermission(BYPASS)) return;
@@ -70,10 +71,10 @@ public final class MovementListener implements Listener {
         lastRescue.put(player.getUniqueId(), now);
 
         player.setFallDistance(0);
-        Plot plot = plugin.islands().plotAt(player.getLocation());
+        Plot plot = plugin.plotAt(player.getLocation());
         Island island = plot != null ? plot.island() : plugin.islands().activeIsland(player.getUniqueId());
         if (island != null) {
-            plugin.islands().teleport(player, island, null);
+            plugin.islandsFor(island).teleport(player, island, null);
         } else {
             plugin.islands().sendToSafe(player, null);
         }
@@ -86,9 +87,9 @@ public final class MovementListener implements Listener {
         if (cause != PlayerTeleportEvent.TeleportCause.ENDER_PEARL
                 && cause != PlayerTeleportEvent.TeleportCause.CHORUS_FRUIT) return;
         Location to = e.getTo();
-        if (!plugin.islands().isChunkWorld(to.getWorld())) return;
+        if (!plugin.isChunkWorld(to.getWorld())) return;
         if (e.getPlayer().hasPermission(BYPASS)) return;
-        Plot plot = plugin.islands().plotAt(to);
+        Plot plot = plugin.plotAt(to);
         if (plot == null || !plot.island().isUnlocked(plot.rel())) {
             e.setCancelled(true);
             plugin.messages().actionBar(e.getPlayer(), "protection.locked");

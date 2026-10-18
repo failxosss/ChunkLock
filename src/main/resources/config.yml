@@ -17,6 +17,35 @@ chunk-world:
   # jakmile klesneš pod Y -10 (pod tou výškou pak nejde kopat). Ploché ostrovy (mode: FLAT) se řídí jen svou výškou.
   void-rescue-below-y: -72
 
+# Nether a End jako chunk systém.
+# Když hráč projde portálem v chunk světě (nebo ve světě z extra-portal-worlds), dostane vlastní chunk v Netheru /
+# Endu. Nether chunk se kopíruje ze zdrojového Netheru a odemyká se věcmi, které v něm opravdu najdeš
+# (unlock.chunk.resources-nether). End: po vstupu do End portálu (postaveného z rámů a očí) dostaneš jeden chunk
+# s výstupním portálem a spawne se Ender drak, který krouží kolem portálu. Po zabití draka portál a vejce zůstanou
+# a odemykání dalších chunků pokračuje (resources-end).
+# Světy se vytvoří při prvním startu (zdrojové světy jsou velké - první start trvá déle). Změna platí po restartu.
+dimensions:
+  # Další světy (kromě chunk světa), ve kterých Nether/End portál vede do chunk Netheru / Endu.
+  extra-portal-worlds: []
+  nether:
+    enabled: true
+    world: "chunkbasebase_nether"
+    source-world: "chunklock_source_nether"   # zdrojový Nether, ze kterého se chunky kopírují
+    seed: ""                                  # prázdné = náhodný seed
+    max-radius: 8                             # kolik chunků od startu (poloměr čtverce)
+    start-range-chunks: 2000                  # v jaké oblasti zdroje se hledá startovní chunk
+  end:
+    enabled: true
+    world: "chunkbasebase_the_end"
+    source-world: "chunklock_source_end"
+    seed: ""
+    max-radius: 4                             # End mimo hlavní ostrov je prázdný, drž to malé
+    start-range-chunks: 0
+    dragon:
+      enabled: true
+      # Drak se při odletu dál než tohle (v blocích) od portálu vrátí zpět.
+      leash-radius: 160
+
 # Jak se chunky generují.
 #  WORLD = chunk se zkopíruje z normálního světa (biomy, jeskyně, rudy, struktury, truhly...)
 #  FLAT  = plochý ostrov podle sekce island.terrain níž (stromy a rudy z configu)
@@ -233,6 +262,28 @@ unlock:
       - { id: kelp,       drop: KELP,         blocks: [KELP, KELP_PLANT],                     weight: 3, from: 0, min-pool: 16, max: 128 }
       - { id: pumpkin,    self: true, blocks: [PUMPKIN],                                       weight: 2, from: 2, min-pool: 2,  max: 12 }
       - { id: melon,      drop: MELON_SLICE,  blocks: [MELON],                                per-block: 3, weight: 2, from: 2, min-pool: 6, max: 48 }
+
+    # Totéž pro Nether (dimensions.nether) - co jde v Netheru opravdu najít.
+    resources-nether:
+      - { id: netherrack, self: true, blocks: [NETHERRACK],                                    weight: 4,  from: 0, min-pool: 64, max: 256 }
+      - { id: quartz,     drop: QUARTZ,       blocks: [NETHER_QUARTZ_ORE],                    per-block: 1, weight: 10, from: 0, min-pool: 6,  max: 128, core: true }
+      - { id: nugget,     drop: GOLD_NUGGET,  blocks: [NETHER_GOLD_ORE],                      per-block: 3, weight: 8,  from: 0, min-pool: 6,  max: 128, core: true }
+      - { id: debris,     drop: ANCIENT_DEBRIS, blocks: [ANCIENT_DEBRIS],                     per-block: 1, weight: 3,  from: 2, min-pool: 1,  max: 8,   core: true }
+      - { id: soul,       self: true, blocks: [SOUL_SAND, SOUL_SOIL],                          weight: 4,  from: 0, min-pool: 16, max: 192 }
+      - { id: basalt,     self: true, blocks: [BASALT, SMOOTH_BASALT],                         weight: 3,  from: 0, min-pool: 32, max: 192 }
+      - { id: blackstone, self: true, blocks: [BLACKSTONE, GILDED_BLACKSTONE],                 weight: 3,  from: 0, min-pool: 32, max: 192 }
+      - { id: glowstone,  drop: GLOWSTONE_DUST, blocks: [GLOWSTONE],                          per-block: 4, weight: 5,  from: 0, min-pool: 8,  max: 128 }
+      - { id: magma,      self: true, blocks: [MAGMA_BLOCK],                                   weight: 2,  from: 0, min-pool: 8,  max: 64 }
+      - { id: stems,      self: true, blocks: [CRIMSON_STEM, WARPED_STEM],                     weight: 6,  from: 0, min-pool: 12, max: 128, core: true }
+      - { id: warts,      self: true, blocks: [NETHER_WART_BLOCK, WARPED_WART_BLOCK],          weight: 3,  from: 0, min-pool: 16, max: 128 }
+      - { id: shroom,     self: true, blocks: [SHROOMLIGHT],                                   weight: 2,  from: 0, min-pool: 4,  max: 32 }
+      - { id: gravel,     self: true, blocks: [GRAVEL],                                        weight: 2,  from: 0, min-pool: 32, max: 192 }
+    # A pro End (dimensions.end).
+    resources-end:
+      - { id: endstone,   self: true, blocks: [END_STONE],                                     weight: 8,  from: 0, min-pool: 64, max: 256 }
+      - { id: obsidian,   self: true, blocks: [OBSIDIAN],                                      weight: 5,  from: 0, min-pool: 4,  max: 64,  core: true }
+      - { id: chorus,     drop: CHORUS_FRUIT, blocks: [CHORUS_PLANT, CHORUS_FLOWER],          per-block: 1, weight: 6, from: 0, min-pool: 4, max: 64, core: true }
+      - { id: purpur,     self: true, blocks: [PURPUR_BLOCK, PURPUR_PILLAR],                   weight: 3,  from: 0, min-pool: 8,  max: 96 }
 
   # Režim TIERS: každý zamčený chunk má jiné požadavky. Položky tieru níž fungují jako zásobník,
   # ze kterého se pro každý chunk (stabilně) vybere jiná kombinace a množství.

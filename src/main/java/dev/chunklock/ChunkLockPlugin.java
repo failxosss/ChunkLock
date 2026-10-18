@@ -8,21 +8,33 @@ import dev.chunklock.listener.GuiListener;
 import dev.chunklock.listener.MobListener;
 import dev.chunklock.listener.MovementListener;
 import dev.chunklock.listener.PanelListener;
+import dev.chunklock.listener.PortalListener;
 import dev.chunklock.listener.PlayerListener;
 import dev.chunklock.listener.ProtectionListener;
 import dev.chunklock.manager.EconomyHook;
+import dev.chunklock.manager.EndManager;
 import dev.chunklock.manager.InviteManager;
 import dev.chunklock.manager.IslandManager;
 import dev.chunklock.manager.PanelManager;
 import dev.chunklock.manager.ResourceScanner;
 import dev.chunklock.manager.Storage;
 import dev.chunklock.manager.UnlockService;
+import dev.chunklock.model.Dimension;
 import dev.chunklock.model.Island;
 import dev.chunklock.util.VoidGenerator;
+import org.bukkit.Location;
+import org.bukkit.World;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.generator.ChunkGenerator;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.EnumMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 public final class ChunkLockPlugin extends JavaPlugin {
 
@@ -35,6 +47,8 @@ public final class ChunkLockPlugin extends JavaPlugin {
     private ResourceScanner resources;
     private InviteManager invites;
     private EconomyHook economy;
+    private EndManager end;
+    private final Map<Dimension, IslandManager> realms = new EnumMap<>(Dimension.class);
 
     @Override
     public void onEnable() {
@@ -43,7 +57,8 @@ public final class ChunkLockPlugin extends JavaPlugin {
         messages = new Messages(this);
         storage = new Storage(this);
         invites = new InviteManager();
-        islands = new IslandManager(this);
+        islands = new IslandManager(this, Dimension.OVERWORLD);
+        end = new EndManager(this);
         panels = new PanelManager(this);
         unlocks = new UnlockService(this);
         resources = new ResourceScanner(this);
@@ -52,7 +67,18 @@ public final class ChunkLockPlugin extends JavaPlugin {
             getServer().getPluginManager().disablePlugin(this);
             return;
         }
+        realms.put(Dimension.OVERWORLD, islands);
+        for (Dimension d : new Dimension[]{Dimension.NETHER, Dimension.END}) {
+            if (!settings.dimension(d).enabled()) continue;
+            IslandManager m = new IslandManager(this, d);
+            if (m.init()) {
+                realms.put(d, m);
+            } else {
+                getLogger().warning("Dimenze " + d.id() + " se nepodařilo zapnout, je vypnutá.");
+            }
+        }
 
+        getServer().getPluginManager().registerEvents(new PortalListener(this), this);
         getServer().getPluginManager().registerEvents(new ProtectionListener(this), this);
         getServer().getPluginManager().registerEvents(new MovementListener(this), this);
         getServer().getPluginManager().registerEvents(new MobListener(this), this);
@@ -72,7 +98,7 @@ public final class ChunkLockPlugin extends JavaPlugin {
         getServer().getScheduler().runTask(this, panels::sweepAll); // smaže případné zbytky po minulém běhu
         getServer().getScheduler().runTaskTimer(this, panels::tick, 40L, 40L);
         // pravidelné ukládání
-        getServer().getScheduler().runTaskTimer(this, islands::saveAll, 6000L, 6000L);
+        getServer().getScheduler().runTaskTimer(this, this::saveAll, 6000L, 6000L);
 
         if (getServer().getPluginManager().isPluginEnabled("PlaceholderAPI")) {
             new dev.chunklock.hook.ChunkLockExpansion(this).register();
@@ -85,7 +111,12 @@ public final class ChunkLockPlugin extends JavaPlugin {
     @Override
     public void onDisable() {
         if (panels != null) panels.removeAll();
-        if (islands != null) islands.saveAll();
+        if (end != null) end.shutdown();
+        saveAll();
+    }
+
+    public void saveAll() {
+        for (IslandManager m : realms.values()) m.saveAll();
     }
 
     /** Umožní použít plugin jako generátor ve světě (bukkit.yml / Multiverse). */
@@ -98,9 +129,9 @@ public final class ChunkLockPlugin extends JavaPlugin {
         reloadConfig();
         settings = new Settings(getConfig(), getLogger());
         messages.reload();
-        if (islands != null) {
-            // požadavky se počítají znovu podle nové konfigurace (odevzdané itemy zůstávají započtené)
-            for (Island island : islands.all()) island.clearAllRequired();
+        // požadavky se počítají znovu podle nové konfigurace (odevzdané itemy zůstávají započtené)
+        for (IslandManager m : realms.values()) {
+            for (Island island : m.all()) island.clearAllRequired();
         }
         if (panels != null) panels.removeAll(); // cedulky se za chvíli samy vytvoří znovu s novými čísly
     }
@@ -127,6 +158,55 @@ public final class ChunkLockPlugin extends JavaPlugin {
 
     public IslandManager islands() {
         return islands;
+    }
+
+    public EndManager end() {
+        return end;
+    }
+
+    /** Správce dané dimenze, nebo null, když je vypnutá. */
+    public @Nullable IslandManager islands(Dimension d) {
+        return realms.get(d);
+    }
+
+    public Collection<IslandManager> allIslandManagers() {
+        return new ArrayList<>(realms.values());
+    }
+
+    public IslandManager islandsFor(Island island) {
+        IslandManager m = realms.get(island.dimension());
+        return m != null ? m : islands;
+    }
+
+    /** Správce, kterému patří daný svět, jinak null. */
+    public @Nullable IslandManager islandsAt(@Nullable World w) {
+        if (w == null) return null;
+        for (IslandManager m : realms.values()) if (m.isChunkWorld(w)) return m;
+        return null;
+    }
+
+    public @Nullable Dimension dimensionOf(@Nullable World w) {
+        IslandManager m = islandsAt(w);
+        return m == null ? null : m.dimension();
+    }
+
+    public boolean isChunkWorld(@Nullable World w) {
+        return islandsAt(w) != null;
+    }
+
+    public IslandManager.@Nullable Plot plotAt(Location loc) {
+        IslandManager m = islandsAt(loc.getWorld());
+        return m == null ? null : m.plotAt(loc);
+    }
+
+    /** Odstraní ostrovy v Netheru/Endu patřící majiteli (při resetu nebo smazání hlavního ostrova). */
+    public void removeRealmIslands(UUID owner, String reason) {
+        for (Dimension d : new Dimension[]{Dimension.NETHER, Dimension.END}) {
+            IslandManager m = realms.get(d);
+            if (m == null) continue;
+            Island child = m.byOwner(owner);
+            if (child != null) m.removeSilently(child, reason);
+        }
     }
 
     public PanelManager panels() {

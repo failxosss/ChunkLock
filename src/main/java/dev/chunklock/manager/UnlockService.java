@@ -119,7 +119,7 @@ public final class UnlockService {
      * Režim TIERS: pevné požadavky z config.yml.
      */
     public List<Settings.Requirement> requirements(Island island, ChunkPos rel) {
-        if (!plugin.settings().chunkMode) return tierRequirements(island, rel);
+        if (!plugin.settings().chunkModeFor(island.dimension())) return tierRequirements(island, rel);
 
         Map<Material, Integer> cached = island.required(rel);
         if (cached == null) {
@@ -152,7 +152,7 @@ public final class UnlockService {
         if (neighbours.isEmpty()) return null;
 
         Map<Settings.ResourceRule, Integer> out = new LinkedHashMap<>();
-        for (Settings.ResourceRule rule : plugin.settings().resourceRules) {
+        for (Settings.ResourceRule rule : plugin.settings().rulesFor(island.dimension())) {
             int best = 0;
             for (Map<Material, Integer> counts : neighbours) {
                 double sum = 0;
@@ -229,7 +229,7 @@ public final class UnlockService {
             picked.add(c);
         }
 
-        List<Settings.ResourceRule> order = s.resourceRules;
+        List<Settings.ResourceRule> order = s.rulesFor(island.dimension());
         picked.sort(Comparator.comparingInt(c -> order.indexOf(c.rule())));
 
         double variance = s.shareVariance / 100.0;
@@ -356,7 +356,7 @@ public final class UnlockService {
             msg.send(player, "unlock.no-permission");
             return false;
         }
-        if (!plugin.islands().canUnlock(island, rel)) {
+        if (!plugin.islandsFor(island).canUnlock(island, rel)) {
             msg.send(player, "unlock.not-allowed");
             return false;
         }
@@ -444,7 +444,7 @@ public final class UnlockService {
 
     private void complete(Player player, Island island, ChunkPos rel) {
         String contributors = contributorSummary(island, rel); // dřív, než unlockChunk smaže postup
-        plugin.islands().unlockChunk(island, rel);
+        plugin.islandsFor(island).unlockChunk(island, rel);
         Set<UUID> ids = new HashSet<>(island.members().keySet());
         ids.add(island.owner());
         for (UUID id : ids) {

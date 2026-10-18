@@ -37,6 +37,9 @@ public final class Island {
         }
     }
 
+    private final Dimension dimension;
+    /** Ostrov v Netheru / Endu patří k ostrovu v overworldu (sdílí členy a oprávnění). U overworldu null. */
+    private Island parent;
     private final UUID owner;
     private String ownerName;
     private final int gridX;
@@ -53,6 +56,10 @@ public final class Island {
     /** Kdo kolik odevzdal u jednotlivých zamčených chunků (maže se při odemčení). */
     private final Map<Long, Map<UUID, Integer>> contributors = new HashMap<>();
     private boolean mobSpawning = true;
+    /** End: drak už byl zabit (aktivní výstupní portál). */
+    private boolean dragonKilled;
+    /** Výška podlahy u startovního chunku (Nether: referenční výška pro cedulky a spawn). */
+    private int refY = Integer.MIN_VALUE;
     /** Počátek terénu ve zdrojovém světě (chunk souřadnice); null = ostrov je plochý (starý způsob). */
     private Integer sourceX;
     private Integer sourceZ;
@@ -60,10 +67,48 @@ public final class Island {
     private long created = System.currentTimeMillis();
 
     public Island(UUID owner, String ownerName, int gridX, int gridZ) {
+        this(Dimension.OVERWORLD, null, owner, ownerName, gridX, gridZ);
+    }
+
+    public Island(Dimension dimension, Island parent, UUID owner, String ownerName, int gridX, int gridZ) {
+        this.dimension = dimension;
+        this.parent = parent;
         this.owner = owner;
         this.ownerName = ownerName;
         this.gridX = gridX;
         this.gridZ = gridZ;
+    }
+
+    public Dimension dimension() {
+        return dimension;
+    }
+
+    public Island parent() {
+        return parent;
+    }
+
+    public void setParent(Island parent) {
+        this.parent = parent;
+    }
+
+    public boolean dragonKilled() {
+        return dragonKilled;
+    }
+
+    public void setDragonKilled(boolean dragonKilled) {
+        this.dragonKilled = dragonKilled;
+    }
+
+    public boolean hasRefY() {
+        return refY != Integer.MIN_VALUE;
+    }
+
+    public int refY() {
+        return refY;
+    }
+
+    public void setRefY(int refY) {
+        this.refY = refY;
     }
 
     public UUID owner() {
@@ -117,7 +162,7 @@ public final class Island {
     }
 
     public boolean mobSpawning() {
-        return mobSpawning;
+        return parent != null ? parent.mobSpawning() : mobSpawning;
     }
 
     public void setMobSpawning(boolean mobSpawning) {
@@ -151,6 +196,8 @@ public final class Island {
         progress.clear();
         resources.clear();
         required.clear();
+        dragonKilled = false;
+        refY = Integer.MIN_VALUE;
         contributions.clear();
         contributors.clear();
         created = System.currentTimeMillis();
@@ -202,7 +249,7 @@ public final class Island {
     /** Jméno majitele / člena (nebo "?"). */
     public String nameOf(UUID uuid) {
         if (owner.equals(uuid)) return ownerName;
-        Member m = members.get(uuid);
+        Member m = members().get(uuid);
         return m == null ? "?" : m.name();
     }
 
@@ -259,29 +306,30 @@ public final class Island {
     // ---- členové ----
 
     public boolean isMember(UUID uuid) {
-        return owner.equals(uuid) || members.containsKey(uuid);
+        return owner.equals(uuid) || members().containsKey(uuid);
     }
 
     public boolean hasPermission(UUID uuid, IslandPermission permission) {
         if (owner.equals(uuid)) return true;
-        Member m = members.get(uuid);
+        Member m = members().get(uuid);
         return m != null && m.permissions().contains(permission);
     }
 
+    /** Členové (u ostrova v Netheru / Endu se berou z ostrova v overworldu). */
     public Map<UUID, Member> members() {
-        return members;
+        return parent != null ? parent.members() : members;
     }
 
     public void addMember(UUID uuid, String name, Collection<IslandPermission> perms) {
-        members.put(uuid, new Member(name, perms));
+        members().put(uuid, new Member(name, perms));
     }
 
     public void removeMember(UUID uuid) {
-        members.remove(uuid);
+        members().remove(uuid);
     }
 
     public UUID findMember(String name) {
-        for (Map.Entry<UUID, Member> e : members.entrySet()) {
+        for (Map.Entry<UUID, Member> e : members().entrySet()) {
             if (e.getValue().name().equalsIgnoreCase(name)) return e.getKey();
         }
         return null;
@@ -289,7 +337,7 @@ public final class Island {
 
     /** Přepne oprávnění, vrátí novou hodnotu. */
     public boolean togglePermission(UUID uuid, IslandPermission permission) {
-        Member m = members.get(uuid);
+        Member m = members().get(uuid);
         if (m == null) return false;
         if (m.permissions().contains(permission)) {
             m.permissions().remove(permission);

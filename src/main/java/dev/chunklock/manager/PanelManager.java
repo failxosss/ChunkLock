@@ -5,6 +5,7 @@ import dev.chunklock.config.Messages;
 import dev.chunklock.config.Settings;
 import dev.chunklock.manager.IslandManager.Plot;
 import dev.chunklock.model.ChunkPos;
+import dev.chunklock.model.Dimension;
 import dev.chunklock.model.Island;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Color;
@@ -62,10 +63,15 @@ public final class PanelManager {
     private final NamespacedKey panelKey;
     /** Značka na VŠECH entitách cedulek (hodnota = UUID majitele ostrova) - umožňuje najít a smazat sirotky. */
     private final NamespacedKey ownerKey;
-    private final Map<UUID, List<Panel>> panels = new HashMap<>();
+    private final Map<String, List<Panel>> panels = new HashMap<>();
     private final Set<UUID> tracked = new HashSet<>();
     /** Ostrovy, kterým se zrovna nesmí vytvářet cedulky (probíhá reset). */
-    private final Map<UUID, Integer> suspended = new HashMap<>();
+    private final Map<String, Integer> suspended = new HashMap<>();
+
+    /** Klíč ostrova napříč dimenzemi: dimenze;majitel. */
+    private static String k(Island island) {
+        return island.dimension().id() + ";" + island.owner();
+    }
 
     public PanelManager(ChunkLockPlugin plugin) {
         this.plugin = plugin;
@@ -81,9 +87,9 @@ public final class PanelManager {
 
     /** Zahodí staré cedulky ostrova a vytvoří nové. */
     public void spawn(Island island) {
-        remove(island.owner());
-        if (suspended.containsKey(island.owner())) return;
-        IslandManager im = plugin.islands();
+        remove(island);
+        if (suspended.containsKey(k(island))) return;
+        IslandManager im = plugin.islandsFor(island);
         if (im.world() == null) return;
         List<Panel> list = new ArrayList<>();
         Deque<Runnable> pending = new ArrayDeque<>(); // další patra cedulek (pod sebou), vznikají postupně
@@ -94,14 +100,14 @@ public final class PanelManager {
                 }
             }
         }
-        panels.put(island.owner(), list);
+        panels.put(k(island), list);
         World w = im.world();
         for (Player p : w.getPlayers()) syncVisibility(p, list);
-        if (!pending.isEmpty()) buildStack(island.owner(), list, pending);
+        if (!pending.isEmpty()) buildStack(k(island), list, pending);
     }
 
     /** Postaví další patra cedulek po několika za tick (jinak by server při velkém počtu entit zaseknul). */
-    private void buildStack(UUID owner, List<Panel> list, Deque<Runnable> pending) {
+    private void buildStack(String owner, List<Panel> list, Deque<Runnable> pending) {
         final int perTick = Math.max(1, plugin.settings().stackPerTick);
         new BukkitRunnable() {
             @Override
@@ -134,24 +140,28 @@ public final class PanelManager {
     }
 
     /** Zastaví tvorbu cedulek ostrova a smaže stávající (použito při resetu). */
-    public void suspend(UUID owner) {
-        suspended.merge(owner, 1, Integer::sum);
-        remove(owner);
+    public void suspend(Island island) {
+        suspended.merge(k(island), 1, Integer::sum);
+        remove(island);
     }
 
     /** Povolí tvorbu cedulek znovu; vzniknou při dalším ticku nebo teleportu. */
-    public void resume(UUID owner) {
-        suspended.computeIfPresent(owner, (k, v) -> v <= 1 ? null : v - 1);
+    public void resume(Island island) {
+        suspended.computeIfPresent(k(island), (key, v) -> v <= 1 ? null : v - 1);
     }
 
     public void ensure(Island island) {
-        if (suspended.containsKey(island.owner())) return;
-        List<Panel> list = panels.get(island.owner());
+        if (suspended.containsKey(k(island))) return;
+        List<Panel> list = panels.get(k(island));
         if (list == null || !valid(list)) spawn(island);
     }
 
-    public void remove(UUID owner) {
-        List<Panel> list = panels.remove(owner);
+    public void remove(Island island) {
+        removeKey(k(island), plugin.islandsFor(island).world());
+    }
+
+    private void removeKey(String key, World w) {
+        List<Panel> list = panels.remove(key);
         if (list != null) {
             for (Panel p : list) {
                 for (Entity e : p.entities) {
@@ -160,14 +170,12 @@ public final class PanelManager {
                 }
             }
         }
-        sweep(owner);
+        sweep(key, w);
     }
 
-    /** Smaže všechny entity cedulek daného majitele (null = všech), i ty, které si manager nepamatuje. */
-    private void sweep(UUID owner) {
-        World w = plugin.islands().world();
+    /** Smaže všechny entity cedulek daného klíče (null = všech) ve světě, i ty, které si manager nepamatuje. */
+    private void sweep(String id, World w) {
         if (w == null) return;
-        String id = owner == null ? null : owner.toString();
         for (Entity e : w.getEntitiesByClasses(Display.class, Interaction.class)) {
             String v = e.getPersistentDataContainer().get(ownerKey, PersistentDataType.STRING);
             if (v == null) continue;
@@ -186,37 +194,39 @@ public final class PanelManager {
 
     /** Úklid po startu pluginu. */
     public void sweepAll() {
-        sweep(null);
+        for (IslandManager m : plugin.allIslandManagers()) sweep(null, m.world());
     }
 
     private <T extends Entity> T add(Panel panel, Island island, T e) {
-        e.getPersistentDataContainer().set(ownerKey, PersistentDataType.STRING, island.owner().toString());
+        e.getPersistentDataContainer().set(ownerKey, PersistentDataType.STRING, k(island));
         tracked.add(e.getUniqueId());
         panel.entities.add(e);
         return e;
     }
 
     public void removeAll() {
-        for (UUID owner : new ArrayList<>(panels.keySet())) remove(owner);
-        sweep(null);
+        sweepAll();
+        for (String key : new ArrayList<>(panels.keySet())) removeKey(key, null);
     }
 
     /** Volá se periodicky: vytváří cedulky pro ostrovy s hráči a ruší ostatní. */
     public void tick() {
-        IslandManager im = plugin.islands();
-        World world = im.world();
-        if (world == null) return;
-        Set<UUID> present = new HashSet<>();
-        for (Player p : world.getPlayers()) {
-            Plot plot = im.plotAt(p.getLocation());
-            if (plot == null) continue;
-            present.add(plot.island().owner());
-            ensure(plot.island());
-            List<Panel> list = panels.get(plot.island().owner());
-            if (list != null) syncVisibility(p, list);
-        }
-        for (UUID owner : new ArrayList<>(panels.keySet())) {
-            if (!present.contains(owner)) remove(owner);
+        for (IslandManager im : plugin.allIslandManagers()) {
+            World world = im.world();
+            if (world == null) continue;
+            String prefix = im.dimension().id() + ";";
+            Set<String> present = new HashSet<>();
+            for (Player p : world.getPlayers()) {
+                Plot plot = im.plotAt(p.getLocation());
+                if (plot == null) continue;
+                present.add(k(plot.island()));
+                ensure(plot.island());
+                List<Panel> list = panels.get(k(plot.island()));
+                if (list != null) syncVisibility(p, list);
+            }
+            for (String key : new ArrayList<>(panels.keySet())) {
+                if (key.startsWith(prefix) && !present.contains(key)) removeKey(key, world);
+            }
         }
     }
 
@@ -232,7 +242,7 @@ public final class PanelManager {
 
     /** Aktualizuje počty u cedulek jednoho chunku. */
     public void refresh(Island island, ChunkPos rel) {
-        List<Panel> list = panels.get(island.owner());
+        List<Panel> list = panels.get(k(island));
         if (list == null) return;
         List<Settings.Requirement> reqs = plugin.unlocks().requirements(island, rel);
         for (Panel p : list) {
@@ -251,7 +261,7 @@ public final class PanelManager {
     /** Spodní hranice pro patra cedulek: bedrock (dno světa u ostrovů z normálního světa). */
     private double bottomY(Island island, World w) {
         Settings s = plugin.settings();
-        if (island.hasSource()) return w.getMinHeight();
+        if (island.dimension() != Dimension.OVERWORLD || island.hasSource()) return w.getMinHeight();
         return Math.max(w.getMinHeight(), s.surfaceY - s.fillerDepth - s.stoneDepth - (s.bedrockBottom ? 1 : 0));
     }
 
@@ -261,7 +271,7 @@ public final class PanelManager {
      */
     private void build(Island island, ChunkPos locked, int[] dir, List<Panel> list, Deque<Runnable> pending) {
         Settings s = plugin.settings();
-        IslandManager im = plugin.islands();
+        IslandManager im = plugin.islandsFor(island);
         World w = im.world();
 
         double minX = (im.centerChunkX(island) + locked.x()) << 4;
@@ -342,7 +352,7 @@ public final class PanelManager {
             in.setResponsive(true);
             in.setPersistent(false);
             in.getPersistentDataContainer().set(panelKey, PersistentDataType.STRING,
-                    island.owner() + ";" + locked.key());
+                    island.dimension().id() + ";" + island.owner() + ";" + locked.key());
         });
         panel.hitbox = hitbox;
         add(panel, island, hitbox);
@@ -351,6 +361,7 @@ public final class PanelManager {
 
     /** Výška terénu u hrany odemčeného souseda (pro ostrovy z normálního světa), jinak pevné surface-y. */
     private double surfaceAt(Island island, World w, int[] dir, double minX, double minZ, double px, double pz) {
+        if (island.dimension() == Dimension.NETHER) return netherSurface(island, w, dir, minX, minZ, px, pz);
         if (!island.hasSource()) return plugin.settings().surfaceY;
         int best = w.getMinHeight();
         for (int off = -4; off <= 4; off += 4) {
@@ -365,7 +376,28 @@ public final class PanelManager {
             }
             best = Math.max(best, w.getHighestBlockYAt(x, z, HeightMap.MOTION_BLOCKING_NO_LEAVES));
         }
+        if (island.dimension() == Dimension.END && island.hasRefY() && best <= w.getMinHeight()) return island.refY();
         return best;
+    }
+
+    /** Nether nemá povrch: cedulka stojí na podlaze nejblíže výšce startovního chunku. */
+    private double netherSurface(Island island, World w, int[] dir, double minX, double minZ, double px, double pz) {
+        int ref = island.hasRefY() ? island.refY() : 64;
+        int best = Integer.MIN_VALUE;
+        for (int off = -4; off <= 4; off += 4) {
+            int x;
+            int z;
+            if (dir[0] != 0) {
+                x = (int) Math.floor(dir[0] < 0 ? minX - 1 : minX + 16);
+                z = (int) Math.floor(pz) + off;
+            } else {
+                x = (int) Math.floor(px) + off;
+                z = (int) Math.floor(dir[1] < 0 ? minZ - 1 : minZ + 16);
+            }
+            int feet = TerrainCopier.findFloorY(w, x, z, ref + 24, ref - 24);
+            if (feet != Integer.MIN_VALUE) best = Math.max(best, feet - 1);
+        }
+        return best == Integer.MIN_VALUE ? ref - 1 : best;
     }
 
     private Component counter(Island island, ChunkPos rel, Settings.Requirement r) {

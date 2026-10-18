@@ -2,6 +2,7 @@ package dev.chunklock.listener;
 
 import dev.chunklock.ChunkLockPlugin;
 import dev.chunklock.model.ChunkPos;
+import dev.chunklock.model.Dimension;
 import dev.chunklock.model.Island;
 import io.papermc.paper.event.player.PrePlayerAttackEntityEvent;
 import org.bukkit.entity.Entity;
@@ -67,13 +68,17 @@ public final class PanelListener implements Listener {
         String data = hitbox.getPersistentDataContainer().get(plugin.panels().key(), PersistentDataType.STRING);
         if (data == null) return;
         String[] parts = data.split(";");
-        if (parts.length != 2) return;
+        if (parts.length != 2 && parts.length != 3) return;
 
         Island island;
         ChunkPos rel;
         try {
-            island = plugin.islands().byOwner(UUID.fromString(parts[0]));
-            rel = ChunkPos.fromKey(Long.parseLong(parts[1]));
+            Dimension dim = parts.length == 3 ? Dimension.parse(parts[0]) : Dimension.OVERWORLD;
+            int o = parts.length - 2;
+            dev.chunklock.manager.IslandManager im = plugin.islands(dim);
+            if (im == null) return;
+            island = im.byOwner(UUID.fromString(parts[o]));
+            rel = ChunkPos.fromKey(Long.parseLong(parts[o + 1]));
         } catch (IllegalArgumentException ex) {
             return;
         }

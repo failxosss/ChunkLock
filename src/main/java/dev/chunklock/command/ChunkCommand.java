@@ -128,7 +128,7 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
     }
 
     private void teleportWithMessage(Player p, Island island) {
-        islands().teleport(p, island, () -> msg().send(p, "teleported", ph("owner", island.ownerName())));
+        plugin.islandsFor(island).teleport(p, island, () -> msg().send(p, "teleported", ph("owner", island.ownerName())));
     }
 
     // ------------------------------------------------------------------ info / členové
@@ -588,7 +588,17 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
                     return;
                 }
                 Island island = adminIsland(sender, args);
-                if (island != null) teleportWithMessage(p, island);
+                if (island == null) return;
+                if (args.length >= 4) { // /chunk admin tp <hráč> [overworld|nether|end]
+                    IslandManager dm = plugin.islands(dev.chunklock.model.Dimension.parse(args[3]));
+                    Island child = dm == null ? null : dm.byOwner(island.owner());
+                    if (child == null) {
+                        msg().send(sender, "admin.no-island", ph("player", args[2] + " (" + args[3] + ")"));
+                        return;
+                    }
+                    island = child;
+                }
+                teleportWithMessage(p, island);
             }
             case "unlock" -> {
                 Island island = adminIsland(sender, args);
@@ -832,12 +842,18 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
             msg().send(sender, "admin.restore-invalid");
             return;
         }
-        switch (islands().restoreIsland(restored)) {
+        IslandManager target = plugin.islands(restored.dimension());
+        if (target == null) {
+            msg().send(sender, "portal.disabled");
+            return;
+        }
+        switch (target.restoreIsland(restored)) {
             case OK -> msg().send(sender, "admin.restore-started", ph("player", restored.ownerName()),
                     ph("chunks", restored.unlockedCount()));
             case HAS_ISLAND -> msg().send(sender, "admin.restore-has-island", ph("player", restored.ownerName()));
             case SLOT_TAKEN -> msg().send(sender, "admin.restore-slot-taken");
             case CLEARING -> msg().send(sender, "admin.restore-clearing");
+            case NO_PARENT -> msg().send(sender, "admin.restore-no-parent", ph("player", restored.ownerName()));
         }
     }
 
@@ -883,6 +899,7 @@ public final class ChunkCommand implements CommandExecutor, TabCompleter {
                 for (Island i : islands().all()) out.add(i.ownerName());
                 return filter(out, args[2]);
             }
+            if (args.length == 4 && asub.equals("tp")) return filter(List.of("overworld", "nether", "end"), args[3]);
             if (args.length == 4) {
                 switch (asub) {
                     case "addmember" -> {
