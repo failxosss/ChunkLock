@@ -13,9 +13,12 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.EntityPortalEvent;
 import org.bukkit.event.player.PlayerPortalEvent;
+import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerTeleportEvent.TeleportCause;
 
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
@@ -30,6 +33,8 @@ public final class PortalListener implements Listener {
 
     private final ChunkLockPlugin plugin;
     private final Map<UUID, Long> last = new HashMap<>();
+    /** Hráči, kteří přišli do chunk Endu (pojistka, kdyby se při odchodu portálem nedal zjistit svět). */
+    private final Set<UUID> inEnd = new HashSet<>();
 
     public PortalListener(ChunkLockPlugin plugin) {
         this.plugin = plugin;
@@ -91,7 +96,10 @@ public final class PortalListener implements Listener {
         }
         final Island dest = child;
         manager.teleport(player, dest, () -> {
-            if (target == Dimension.END) plugin.end().ensureDragon(dest);
+            if (target == Dimension.END) {
+                inEnd.add(player.getUniqueId());
+                plugin.end().ensureDragon(dest);
+            }
             plugin.messages().send(player, "portal.arrived", ph("dimension", target.id()), ph("owner", dest.ownerName()));
         });
     }
@@ -105,6 +113,29 @@ public final class PortalListener implements Listener {
             return;
         }
         plugin.islands().teleport(player, parent, null);
+    }
+
+    /**
+     * Odchod z Endu výstupním portálem: vanilla tu nevolá PlayerPortalEvent, ale hráče "respawne" s důvodem
+     * END_PORTAL. Tady ho vrátíme na jeho chunk a případně spustíme příkazy z dimensions.end.exit-commands.
+     */
+    @EventHandler(priority = EventPriority.HIGH)
+    public void onEndExit(PlayerRespawnEvent e) {
+        if (e.getRespawnReason() != PlayerRespawnEvent.RespawnReason.END_PORTAL) return;
+        Player player = e.getPlayer();
+        boolean wasInEnd = inEnd.remove(player.getUniqueId()) || plugin.dimensionOf(player.getWorld()) == Dimension.END;
+        if (!wasInEnd) return; // jiný End (vanilla), nesahat
+
+        Island home = null;
+        Plot plot = plugin.plotAt(player.getLocation());
+        if (plot != null) home = plot.island().parent();
+        if (home == null) home = plugin.islands().activeIsland(player.getUniqueId());
+        if (home != null) e.setRespawnLocation(plugin.islands().spawnLocation(home));
+
+        if (!plugin.getConfig().getStringList("dimensions.end.exit-commands").isEmpty()) {
+            plugin.getServer().getScheduler().runTaskLater(plugin,
+                    () -> plugin.islands().runCommands(player, "dimensions.end.exit-commands"), 5L);
+        }
     }
 
     /** Moby a itemy nesmí portály do vanilla světů. */
