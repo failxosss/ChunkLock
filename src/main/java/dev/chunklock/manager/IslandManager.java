@@ -687,7 +687,7 @@ public final class IslandManager {
     }
 
     /** Příkazy: "[console] cmd" (výchozí) nebo "[player] cmd"; %player% = jméno hráče. */
-    private void runCommands(Player player, String path) {
+    public void runCommands(Player player, String path) {
         if (!player.isOnline()) return;
         for (String raw : plugin.getConfig().getStringList(path)) {
             String line = raw.trim();

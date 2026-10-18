@@ -68,7 +68,7 @@ V `config.yml` sekce `generation` (výchozí `mode: WORLD`): plugin si vytvoří
 (název i seed jdou nastavit) a při vytvoření ostrova a každém odemčení chunku z něj zkopíruje odpovídající chunk
 do void světa: bloky, biomy, jeskyně, rudy, struktury, truhly i spawnery. Sousední chunky ostrova pocházejí ze
 sousedních chunků zdrojového světa, takže terén a biomy na sebe plynule navazují. Start ostrova se hledá na souši
-(ne v oceánu). `mode: FLAT` vrací původní plochý ostrov. Ostrovy vytvořené dřív zůstávají ploché.
+(ne v oceánu). `mode: FLAT` je nouzový jednoduchý plochý ostrov (tráva, hlína, kámen). Ostrovy vytvořené dřív zůstávají ploché.
 
 ## Požadavky na odemčení podle surovin v chunku
 
@@ -116,11 +116,9 @@ Před `/chunk reset confirm`, `/chunk admin reset` a `/chunk admin delete` se ul
 vrátí postup, členy a odemčené chunky a terén vygeneruje znovu. Stavby hráčů se neobnovují. Hráč nesmí mít jiný ostrov
 (po resetu nejdřív `/chunk admin delete <hráč>`).
 
-## Cedulky pod sebou
+## Cedulky jezdí za hráčem
 
-`panel.stack` v `config.yml`: stejná cedulka se opakuje pod sebou každých `spacing` bloků (výchozí 10) až k bedrocku,
-všechna patra fungují stejně (klik, shift + klik, stejné počty). `max-levels` omezí počet pater (0 = až k bedrocku),
-`per-tick` kolik pater se postaví za tick. Každé patro je asi 10 entit, u velkého ostrova to jsou tisíce.
+U každé zamčené stěny má každý hráč vlastní cedulku, kterou vidí jen on (ostatním je skrytá). Zůstává na stěně, ale svisle se posouvá podle výšky toho hráče, takže ji máš vždy před sebou, i když kopeš dolů nebo stavíš nahoru. Drobné pohyby (skákání) se ignorují. Cedulky vznikají hráči, když stojí na ostrově, a mizí, když odejde. Počet entit tak roste s počtem hráčů na ostrově.
 
 ## Odemykací svitek
 
@@ -138,6 +136,7 @@ Stejný chunk systém funguje i v Netheru a Endu (`dimensions:` v `config.yml`).
 - **Nether:** když v chunk světě (nebo ve světě z `dimensions.extra-portal-worlds`) projdeš Nether portálem, dostaneš vlastní chunk v Netheru zkopírovaný ze zdrojového Netheru. Odemyká se věcmi, které v sousedním chunku opravdu najdeš (`unlock.chunk.resources-nether`: netherrack, křemen, zlaté nugety, ancient debris, soul sand, bazalt, glowstone, stonky...). Portál v Netheru vede zpět na ostrov v overworldu.
 - **End:** vstup do End portálu (postaveného z rámů a očí) tě přenese na jeden chunk s výstupním portálem a spawne se Ender drak. Drak má boss bar, nerozbíjí bloky a když odletí dál než `dimensions.end.dragon.leash-radius`, vrátí se. Po zabití draka výstupní portál a vejce zůstanou a odemykání dalších chunků (`resources-end`) pokračuje. Portál v Endu vede domů.
 - Členové, oprávnění a mobs se sdílejí s hlavním ostrovem v overworldu; reset nebo smazání hlavního ostrova smaže i jeho Nether a End část (se zálohou).
+- Výstupní End portál po zabití draka spustí příkazy z `dimensions.end.exit-commands` (výchozí `[player] chunk`), jen v chunk Endu. Prázdný seznam = návrat na ostrov v overworldu.
 - `/chunk admin tp <hráč> [overworld|nether|end]` teleportuje do dané dimenze.
 
 **Upozornění:** první start vytvoří dva další zdrojové světy (je to náročné). Let draka s vlastním podiem nebyl na reálném serveru ověřen; kdyby se choval divně, nastav `dimensions.end.dragon.enabled: false` nebo zmenši `leash-radius`. `max-radius` v Endu drž malý, mimo hlavní ostrov je End prázdný.

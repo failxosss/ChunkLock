@@ -22,14 +22,11 @@ import org.bukkit.entity.Player;
 import org.bukkit.entity.TextDisplay;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataType;
-import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.Transformation;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -49,6 +46,16 @@ public final class PanelManager {
     private static final class Panel {
         final ChunkPos rel;
         final List<Entity> entities = new ArrayList<>();
+        /** Výška každé entity nad spodní hranou cedulky (stejné pořadí jako entities). */
+        final List<Double> offsets = new ArrayList<>();
+        /** Hráč, který cedulku vidí (každý hráč má vlastní, ostatním je skrytá). */
+        Player viewer;
+        World world;
+        double base;
+        double minBase;
+        double maxBase;
+        double px;
+        double pz;
         final Map<Material, TextDisplay> counters = new LinkedHashMap<>();
         TextDisplay footer;
         TextDisplay moneyLine;
@@ -85,57 +92,60 @@ public final class PanelManager {
 
     // ---------------------------------------------------------------- životní cyklus
 
-    /** Zahodí staré cedulky ostrova a vytvoří nové. */
+    /** Zahodí staré cedulky ostrova a každému hráči, který na něm stojí, vytvoří nové (vlastní). */
     public void spawn(Island island) {
         remove(island);
         if (suspended.containsKey(k(island))) return;
         IslandManager im = plugin.islandsFor(island);
         if (im.world() == null) return;
-        List<Panel> list = new ArrayList<>();
-        Deque<Runnable> pending = new ArrayDeque<>(); // další patra cedulek (pod sebou), vznikají postupně
+        for (Player p : im.world().getPlayers()) {
+            Plot plot = im.plotAt(p.getLocation());
+            if (plot != null && plot.island() == island) buildFor(island, p);
+        }
+    }
+
+    /** Postaví hráči cedulky u všech zamčených stěn ostrova. Vidí je jen on. */
+    private void buildFor(Island island, Player viewer) {
+        IslandManager im = plugin.islandsFor(island);
+        List<Panel> list = panels.computeIfAbsent(k(island), x -> new ArrayList<>());
         for (ChunkPos locked : im.lockedFrontier(island)) {
             for (int[] d : IslandManager.DIRS) {
                 if (island.isUnlocked(locked.offset(d[0], d[1]))) {
-                    build(island, locked, d, list, pending);
+                    build(island, locked, d, list, viewer);
                 }
             }
         }
-        panels.put(k(island), list);
-        World w = im.world();
-        for (Player p : w.getPlayers()) syncVisibility(p, list);
-        if (!pending.isEmpty()) buildStack(k(island), list, pending);
     }
 
-    /** Postaví další patra cedulek po několika za tick (jinak by server při velkém počtu entit zaseknul). */
-    private void buildStack(String owner, List<Panel> list, Deque<Runnable> pending) {
-        final int perTick = Math.max(1, plugin.settings().stackPerTick);
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                if (panels.get(owner) != list) { // cedulky mezitím zrušeny / přegenerovány
-                    cancel();
-                    return;
-                }
-                for (int i = 0; i < perTick && !pending.isEmpty(); i++) {
-                    try {
-                        pending.poll().run();
-                    } catch (RuntimeException ex) {
-                        plugin.getLogger().log(java.util.logging.Level.WARNING, "Stavba patra cedulky selhala", ex);
-                    }
-                }
-                if (pending.isEmpty()) cancel();
+    private List<Panel> panelsOf(Island island, Player viewer) {
+        List<Panel> out = new ArrayList<>();
+        List<Panel> list = panels.get(k(island));
+        if (list == null) return out;
+        for (Panel p : list) if (p.viewer == viewer) out.add(p); // stejná instance (po novém připojení je hráč jiný objekt)
+        return out;
+    }
+
+    /** Smaže cedulky vyhovující podmínce (entity i záznamy). */
+    private void drop(List<Panel> list, java.util.function.Predicate<Panel> which) {
+        java.util.Iterator<Panel> it = list.iterator();
+        while (it.hasNext()) {
+            Panel p = it.next();
+            if (!which.test(p)) continue;
+            for (Entity e : p.entities) {
+                tracked.remove(e.getUniqueId());
+                e.remove();
             }
-        }.runTaskTimer(plugin, 1L, 1L);
+            it.remove();
+        }
     }
 
-    /** Řádek s cenou vidí jen hráči s permisí pro nákup za peníze. */
-    private void syncVisibility(Player player, List<Panel> list) {
-        boolean canSee = plugin.unlocks().canPay(player);
-        for (Panel panel : list) {
-            TextDisplay line = panel.moneyLine;
-            if (line == null || !line.isValid()) continue;
-            if (canSee) player.showEntity(plugin, line);
-            else player.hideEntity(plugin, line);
+    private void ensureFor(Island island, Player player) {
+        if (suspended.containsKey(k(island))) return;
+        List<Panel> mine = panelsOf(island, player);
+        if (mine.isEmpty() || !valid(mine)) {
+            List<Panel> list = panels.get(k(island));
+            if (list != null) drop(list, p -> p.viewer == player || p.viewer == null || !p.viewer.isOnline());
+            buildFor(island, player);
         }
     }
 
@@ -151,9 +161,12 @@ public final class PanelManager {
     }
 
     public void ensure(Island island) {
-        if (suspended.containsKey(k(island))) return;
-        List<Panel> list = panels.get(k(island));
-        if (list == null || !valid(list)) spawn(island);
+        IslandManager im = plugin.islandsFor(island);
+        if (im.world() == null) return;
+        for (Player p : im.world().getPlayers()) {
+            Plot plot = im.plotAt(p.getLocation());
+            if (plot != null && plot.island() == island) ensureFor(island, p);
+        }
     }
 
     public void remove(Island island) {
@@ -197,10 +210,12 @@ public final class PanelManager {
         for (IslandManager m : plugin.allIslandManagers()) sweep(null, m.world());
     }
 
-    private <T extends Entity> T add(Panel panel, Island island, T e) {
+    private <T extends Entity> T add(Panel panel, Island island, T e, double dy) {
+        panel.offsets.add(dy);
         e.getPersistentDataContainer().set(ownerKey, PersistentDataType.STRING, k(island));
         tracked.add(e.getUniqueId());
         panel.entities.add(e);
+        if (panel.viewer != null) panel.viewer.showEntity(plugin, e); // ostatním zůstává skrytá
         return e;
     }
 
@@ -209,23 +224,28 @@ public final class PanelManager {
         for (String key : new ArrayList<>(panels.keySet())) removeKey(key, null);
     }
 
-    /** Volá se periodicky: vytváří cedulky pro ostrovy s hráči a ruší ostatní. */
+    /** Volá se periodicky: vytváří cedulky hráčům na ostrovech a ruší je těm, kdo odešli. */
     public void tick() {
         for (IslandManager im : plugin.allIslandManagers()) {
             World world = im.world();
             if (world == null) continue;
             String prefix = im.dimension().id() + ";";
-            Set<String> present = new HashSet<>();
+            Map<String, Set<Player>> present = new HashMap<>();
             for (Player p : world.getPlayers()) {
                 Plot plot = im.plotAt(p.getLocation());
                 if (plot == null) continue;
-                present.add(k(plot.island()));
-                ensure(plot.island());
-                List<Panel> list = panels.get(k(plot.island()));
-                if (list != null) syncVisibility(p, list);
+                present.computeIfAbsent(k(plot.island()), x -> new HashSet<>()).add(p);
+                ensureFor(plot.island(), p);
             }
             for (String key : new ArrayList<>(panels.keySet())) {
-                if (key.startsWith(prefix) && !present.contains(key)) removeKey(key, world);
+                if (!key.startsWith(prefix)) continue;
+                Set<Player> here = present.getOrDefault(key, Set.of());
+                List<Panel> list = panels.get(key);
+                drop(list, p -> p.viewer == null || !here.contains(p.viewer));
+                if (list.isEmpty()) {
+                    panels.remove(key);
+                    sweep(key, world); // pojistka proti zapomenutým entitám
+                }
             }
         }
     }
@@ -252,7 +272,7 @@ public final class PanelManager {
                 if (d != null && d.isValid()) d.text(counter(island, rel, r));
             }
             if (p.footer != null && p.footer.isValid()) p.footer.text(footer(island, rel));
-            if (p.moneyLine != null && p.moneyLine.isValid()) p.moneyLine.text(moneyText(island, rel));
+            if (p.moneyLine != null && p.moneyLine.isValid()) p.moneyLine.text(moneyText(island, rel, p.viewer));
         }
     }
 
@@ -266,10 +286,10 @@ public final class PanelManager {
     }
 
     /**
-     * Postaví cedulku u hrany zamčeného chunku (horní patro hned) a naplánuje stejné cedulky
-     * pod ní každých panel.stack.spacing bloků až k bedrocku.
+     * Postaví cedulku u hrany zamčeného chunku. Je jen jedna na stěnu a {@link #follow()} ji posouvá nahoru a dolů
+     * podle výšky nejbližšího hráče.
      */
-    private void build(Island island, ChunkPos locked, int[] dir, List<Panel> list, Deque<Runnable> pending) {
+    private void build(Island island, ChunkPos locked, int[] dir, List<Panel> list, Player viewer) {
         Settings s = plugin.settings();
         IslandManager im = plugin.islandsFor(island);
         World w = im.world();
@@ -295,34 +315,55 @@ public final class PanelManager {
         // cedulka je natočená k odemčenému sousedovi (tam stojí hráči); 0 = jih, 90 = západ, 180 = sever, -90 = východ
         final float yaw = dir[1] > 0 ? 0f : dir[1] < 0 ? 180f : dir[0] < 0 ? 90f : -90f;
 
-        list.add(buildAt(island, locked, w, px, pz, tx, tz, top, yaw));
-        if (!s.stackEnabled) return;
-        final double bottom = bottomY(island, w);
-        final double step = Math.max(3.0, s.stackSpacing);
-        final int extra = s.stackMaxLevels > 0 ? s.stackMaxLevels : Integer.MAX_VALUE;
-        for (int level = 1; level <= extra; level++) {
-            final double base = top - level * step;
-            if (base < bottom) break;
-            pending.add(() -> {
-                Panel p = buildAt(island, locked, w, px, pz, tx, tz, base, yaw);
-                list.add(p);
-                for (Player pl : w.getPlayers()) syncVisibility(pl, List.of(p));
-            });
+        Panel p = buildAt(island, locked, w, px, pz, tx, tz, top, yaw, viewer);
+        p.world = w;
+        p.base = top;
+        p.px = px;
+        p.pz = pz;
+        p.minBase = bottomY(island, w) + 1;
+        p.maxBase = w.getMaxHeight() - 4;
+        list.add(p);
+    }
+
+    /**
+     * Volá se často: posune každou cedulku svisle za jejím hráčem (zůstává na stěně, mění jen výšku).
+     * Každý hráč má vlastní cedulky, takže každému jezdí podle jeho výšky. Displeje se posouvají plynule
+     * (teleport-duration), hitbox skočí hned.
+     */
+    public void follow() {
+        final double panelHeight = plugin.settings().panelHeight;
+        for (List<Panel> list : panels.values()) {
+            for (Panel p : list) {
+                Player viewer = p.viewer;
+                if (viewer == null || !viewer.isOnline() || p.world == null || viewer.getWorld() != p.world) continue;
+                if (p.hitbox == null || p.hitbox.isDead()) continue;
+                double target = Math.max(p.minBase, Math.min(p.maxBase, viewer.getLocation().getY() + panelHeight));
+                if (Math.abs(target - p.base) < 0.75) continue; // drobné pohyby (skákání) ignorujeme
+                p.base = target;
+                for (int i = 0; i < p.entities.size(); i++) {
+                    Entity e = p.entities.get(i);
+                    if (e.isDead()) continue;
+                    Location l = e.getLocation();
+                    l.setY(target + p.offsets.get(i));
+                    e.teleport(l);
+                }
+            }
         }
     }
 
     /** Jedno patro cedulky (titulek, itemy, počty, ceny a klikací hitbox) s dolním okrajem ve výšce base. */
     private Panel buildAt(Island island, ChunkPos locked, World w, double px, double pz, double tx, double tz,
-                          double base, float yaw) {
+                          double base, float yaw, Player viewer) {
         Settings s = plugin.settings();
         Panel panel = new Panel(locked);
+        panel.viewer = viewer;
 
         List<Settings.Requirement> items = plugin.unlocks().requirements(island, locked);
         int n = items.size();
 
         // titulek
         Messages msg = plugin.messages();
-        add(panel, island, text(w, new Location(w, px, base + 2.6, pz), msg.get("panel.title"), s.titleScale, yaw));
+        add(panel, island, text(w, new Location(w, px, base + 2.6, pz), msg.get("panel.title"), s.titleScale, yaw), 2.6);
 
         // itemy + počty
         for (int i = 0; i < n; i++) {
@@ -330,18 +371,18 @@ public final class PanelManager {
             double off = (i - (n - 1) / 2.0) * s.itemSpacing;
             double x = px + tx * off;
             double z = pz + tz * off;
-            add(panel, island, item(w, new Location(w, x, base + 1.6, z), r.material(), yaw));
+            add(panel, island, item(w, new Location(w, x, base + 1.6, z), r.material(), yaw), 1.6);
             TextDisplay counter = text(w, new Location(w, x, base + 0.9, z), counter(island, locked, r), 1.0f, yaw);
-            add(panel, island, counter);
+            add(panel, island, counter, 0.9);
             panel.counters.put(r.material(), counter);
         }
 
         // spodní text
         panel.footer = text(w, new Location(w, px, base, pz), footer(island, locked), 1.0f, yaw);
-        add(panel, island, panel.footer);
-        if (plugin.unlocks().moneyAvailable(island)) {
-            panel.moneyLine = text(w, new Location(w, px, base - 0.3, pz), moneyText(island, locked), 1.0f, yaw);
-            add(panel, island, panel.moneyLine);
+        add(panel, island, panel.footer, 0.0);
+        if (plugin.unlocks().moneyAvailable(island) && plugin.unlocks().canPay(viewer)) {
+            panel.moneyLine = text(w, new Location(w, px, base - 0.3, pz), moneyText(island, locked, viewer), 1.0f, yaw);
+            add(panel, island, panel.moneyLine, -0.3);
         }
 
         // klikací hitbox
@@ -350,12 +391,13 @@ public final class PanelManager {
             in.setInteractionWidth(width);
             in.setInteractionHeight(3.8f);
             in.setResponsive(true);
+            in.setVisibleByDefault(false);
             in.setPersistent(false);
             in.getPersistentDataContainer().set(panelKey, PersistentDataType.STRING,
                     island.dimension().id() + ";" + island.owner() + ";" + locked.key());
         });
         panel.hitbox = hitbox;
-        add(panel, island, hitbox);
+        add(panel, island, hitbox, -0.4);
         return panel;
     }
 
@@ -410,10 +452,10 @@ public final class PanelManager {
         return msg.get("panel.footer-click");
     }
 
-    private Component moneyText(Island island, ChunkPos rel) {
+    private Component moneyText(Island island, ChunkPos rel, Player viewer) {
         UnlockService unlocks = plugin.unlocks();
-        String price = unlocks.formatPrice(unlocks.price(island, rel));
-        return plugin.messages().get("panel.footer-money", ph("price", price));
+        double price = viewer != null ? unlocks.price(viewer, island, rel) : unlocks.price(island, rel);
+        return plugin.messages().get("panel.footer-money", ph("price", unlocks.formatPrice(price)));
     }
 
     private Display.Billboard billboard() {
@@ -425,6 +467,7 @@ public final class PanelManager {
         loc.setYaw(yaw);
         loc.setPitch(0f);
         return w.spawn(loc, TextDisplay.class, d -> {
+            d.setVisibleByDefault(false);
             d.text(content);
             d.setBillboard(billboard());
             d.setPersistent(false);
@@ -433,6 +476,7 @@ public final class PanelManager {
             d.setAlignment(TextDisplay.TextAlignment.CENTER);
             d.setLineWidth(400);
             d.setViewRange(viewRange);
+            d.setTeleportDuration(4); // plynulý pohyb nahoru a dolů za hráčem
             d.setTransformation(new Transformation(new Vector3f(), new Quaternionf(),
                     new Vector3f(scale, scale, scale), new Quaternionf()));
         });
@@ -444,11 +488,13 @@ public final class PanelManager {
         loc.setYaw(yaw);
         loc.setPitch(0f);
         return w.spawn(loc, ItemDisplay.class, d -> {
+            d.setVisibleByDefault(false);
             d.setItemStack(new ItemStack(material));
             d.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.GUI);
             d.setBillboard(billboard());
             d.setPersistent(false);
             d.setViewRange(viewRange);
+            d.setTeleportDuration(4);
             d.setTransformation(new Transformation(new Vector3f(), new Quaternionf(),
                     new Vector3f(scale, scale, scale), new Quaternionf()));
         });

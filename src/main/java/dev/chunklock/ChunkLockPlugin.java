@@ -97,6 +97,7 @@ public final class ChunkLockPlugin extends JavaPlugin {
         // cedulky u zamčených chunků
         getServer().getScheduler().runTask(this, panels::sweepAll); // smaže případné zbytky po minulém běhu
         getServer().getScheduler().runTaskTimer(this, panels::tick, 40L, 40L);
+        getServer().getScheduler().runTaskTimer(this, panels::follow, 20L, 4L); // cedulky jezdí za hráčem nahoru a dolů
         // pravidelné ukládání
         getServer().getScheduler().runTaskTimer(this, this::saveAll, 6000L, 6000L);
 

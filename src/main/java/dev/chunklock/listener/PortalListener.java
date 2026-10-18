@@ -54,6 +54,13 @@ public final class PortalListener implements Listener {
 
         Dimension target = cause == TeleportCause.NETHER_PORTAL ? Dimension.NETHER : Dimension.END;
         if (here == target) { // portál uvnitř Netheru / Endu vede zpět domů
+            if (here == Dimension.END && plugin.getConfig().isSet("dimensions.end.exit-commands")
+                    && !plugin.getConfig().getStringList("dimensions.end.exit-commands").isEmpty()) {
+                // výstupní End portál spustí příkazy z configu (jen v chunk Endu), místo aby tě poslal domů
+                plugin.getServer().getScheduler().runTask(plugin,
+                        () -> plugin.islands().runCommands(player, "dimensions.end.exit-commands"));
+                return;
+            }
             goHome(player, e);
             return;
         }
