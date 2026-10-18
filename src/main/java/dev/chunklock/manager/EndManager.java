@@ -13,7 +13,7 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
-import org.bukkit.block.data.type.WallTorch;
+import org.bukkit.block.data.Directional;
 import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDeathEvent;
@@ -118,7 +118,7 @@ public final class EndManager {
     private static void torch(World w, int x, int y, int z, BlockFace face) {
         Block b = w.getBlockAt(x, y, z);
         b.setType(Material.WALL_TORCH, false);
-        if (b.getBlockData() instanceof WallTorch t) {
+        if (b.getBlockData() instanceof Directional t) {
             t.setFacing(face);
             b.setBlockData(t, false);
         }
